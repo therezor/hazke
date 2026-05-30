@@ -41,8 +41,6 @@ struct GameState {
   uint8_t missiles;        // 0..4
   bool    ecm;
   uint8_t laserTier;       // 0 Pulse, 1 Beam, 2 Military
-  bool    dockingComputer;
-  bool    escapePod;
 
   // R21: ECM is unlimited but throttled. `ecmCooldown` decrements toward
   // zero; the input handler refuses to fire while > 0.
@@ -111,8 +109,6 @@ struct GameState {
     missiles = 0;
     ecm = false;
     laserTier = 0;
-    dockingComputer = false;
-    escapePod = false;
     ecmCooldown = 0.0f;
     for (int i = 0; i < NumFactions; i++) standing[i] = 0;
     lastSeenRank = 0;   // Harmless

@@ -534,9 +534,13 @@ void loop() {
       if (mk.downE)  QuestScreen::moveDown();
       if (mk.enterE) QuestScreen::tryEnter(game);
       if (mk.backE) {
-        mode = questsReturn;
-        modePhase = 0.0f;
-        break;
+        // If the discard-confirmation modal is up, BACK cancels it
+        // and stays on the quest board instead of leaving the screen.
+        if (!QuestScreen::tryBack()) {
+          mode = questsReturn;
+          modePhase = 0.0f;
+          break;
+        }
       }
       QuestScreen::draw(canvas, game);
       break;

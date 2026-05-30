@@ -79,8 +79,7 @@ From there you can:
   neighbouring system. Only direct gate links are reachable; the
   galaxy is a graph, not a free-distance grid.
 - **Upgrade.** Spend earnings at the EQUIP shop on missiles, an ECM,
-  a larger hold, better lasers, a docking computer, an escape pod,
-  or hull repairs.
+  a larger hold, better lasers, or hull and shield repairs.
 
 Die (hull → 0) and the game-over screen offers a restart.
 
@@ -200,8 +199,6 @@ Reached from the docked menu (`EQUIP`). All purchases debit
 | LARGE HOLD  | 400 CR | Cargo capacity 20 t → 35 t. |
 | BEAM LASER  | 1000 CR | Mid-tier laser. |
 | MIL LASER   | 6000 CR | Top-tier laser (requires Beam). |
-| DOCK COMP   | 1500 CR | Reserved for autodock assistance. |
-| ESCAPE POD  | 1000 CR | Reserved for ejection on hull death. |
 
 ### Rank
 

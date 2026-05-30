@@ -21,7 +21,7 @@ struct Item {
   uint16_t    priceCR;   // base price in whole credits; REPAIR is dynamic
 };
 
-constexpr int N = 9;
+constexpr int N = 7;
 
 enum : int {
   ItemRepair = 0,
@@ -31,8 +31,6 @@ enum : int {
   ItemLargeHold,
   ItemBeamLaser,
   ItemMilLaser,
-  ItemDockComp,
-  ItemEscapePod,
 };
 
 // REPAIR HULL is a per-press service. Each ENTER restores +10% hull
@@ -52,8 +50,6 @@ inline const Item items[N] = {
   {"LARGE HOLD",   400},
   {"BEAM LASER",  1000},
   {"MIL LASER",   6000},
-  {"DOCK COMP",   1500},
-  {"ESCAPE POD",  1000},
 };
 
 inline int   selected = 0;
@@ -105,8 +101,6 @@ inline const char* statusFor(int idx, const GameState& s) {
     case ItemBeamLaser:  return (s.laserTier >= 1)             ? "OWNED"     : "";
     case ItemMilLaser:   return (s.laserTier >= 2)             ? "OWNED"
                               : (s.laserTier <  1)             ? "NEED BEAM" : "";
-    case ItemDockComp:   return s.dockingComputer              ? "OWNED"     : "";
-    case ItemEscapePod:  return s.escapePod                    ? "OWNED"     : "";
   }
   return "";
 }
@@ -125,8 +119,6 @@ inline void apply(int idx, GameState& s) {
     case ItemLargeHold:  s.cargoMax = s.CargoMaxLarge;  break;
     case ItemBeamLaser:  s.laserTier = 1;               break;
     case ItemMilLaser:   s.laserTier = 2;               break;
-    case ItemDockComp:   s.dockingComputer = true;      break;
-    case ItemEscapePod:  s.escapePod = true;            break;
   }
 }
 

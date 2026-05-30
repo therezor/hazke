@@ -27,6 +27,10 @@ inline int          cursor       = 0;
 inline Quest::Slot  board[Quest::BoardSize];
 inline float        toast        = 0.0f;
 inline char         toastMsg[28] = "";
+// Discard confirmation modal. Set by tryEnter() when ENTER is pressed
+// on an active quest; the second ENTER actually discards, and BACK
+// while it's open cancels the prompt without leaving the screen.
+inline bool         confirmDiscardOpen = false;
 
 inline void flashToast(const char* msg) {
   strncpy(toastMsg, msg, sizeof(toastMsg));
@@ -41,6 +45,7 @@ inline void enter(int sys, int poi) {
   planetPOIidx = poi;
   cursor       = 0;
   toast        = 0.0f;
+  confirmDiscardOpen = false;
   Quest::buildBoard(sys, poi, board);
 }
 
@@ -73,10 +78,16 @@ inline void tryEnter(GameState& g) {
   // With at most one active quest, ENTER toggles: discard if one is
   // already in play (regardless of which row is highlighted — there
   // may be no matching row if the board re-rolled), otherwise accept
-  // the cursor row. Discard incurs a half-reward standing penalty.
-  if (Quest::isActive()) {
+  // the cursor row. Discard now goes through a confirmation modal so
+  // the penalty isn't paid by accident on a stray ENTER press.
+  if (confirmDiscardOpen) {
     Quest::discard(g);
+    confirmDiscardOpen = false;
     flashToast("DISCARDED -REP");
+    return;
+  }
+  if (Quest::isActive()) {
+    confirmDiscardOpen = true;
     return;
   }
   if (!Quest::accept(g, board[cursor])) {
@@ -85,6 +96,14 @@ inline void tryEnter(GameState& g) {
     return;
   }
   flashToast("QUEST ACCEPTED");
+}
+
+// True if BACK should be swallowed by the screen (because the modal
+// is open and BACK only cancels it). hazke.ino calls this before
+// using BACK to exit the screen.
+inline bool tryBack() {
+  if (confirmDiscardOpen) { confirmDiscardOpen = false; return true; }
+  return false;
 }
 
 inline void drawRow(M5Canvas& g, const Quest::Slot& s, int y, bool sel,
@@ -157,12 +176,48 @@ inline void draw(M5Canvas& g, const GameState& gs) {
   }
 
   // Footer hint changes with state.
-  const char* hint = Quest::isActive()
-                       ? "ENTER=DISCARD  DEL=BACK"
-                       : "ENTER=TAKE  DEL=BACK";
+  const char* hint = confirmDiscardOpen
+                       ? "ENTER=CONFIRM  DEL=CANCEL"
+                       : (Quest::isActive()
+                            ? "ENTER=DISCARD  DEL=BACK"
+                            : "ENTER=TAKE  DEL=BACK");
   MenuUI::drawFooter(g, hint);
 
   MenuUI::drawToast(g, toastMsg, toast, 0.6f, 220, 220, 55);
+
+  // Discard confirmation overlay — drawn last so it sits on top of
+  // the board. Mirrors the QUEST COMPLETE popup in LandingScreen but
+  // tinted red since the action is destructive.
+  if (confirmDiscardOpen) {
+    const int boxW = 200;
+    const int boxH = 60;
+    const int boxX = (Config::ScreenW - boxW) / 2;
+    const int boxY = (Config::ScreenH - boxH) / 2;
+    uint16_t bg     = g.color565(48, 0, 0);
+    uint16_t border = g.color565(220, 80, 80);
+    g.fillRect(boxX, boxY, boxW, boxH, bg);
+    g.drawRect(boxX, boxY, boxW, boxH, border);
+    g.drawRect(boxX + 1, boxY + 1, boxW - 2, boxH - 2, border);
+
+    g.setTextSize(1);
+    g.setTextColor(border, bg);
+    const char* title = "DISCARD QUEST?";
+    int tw = (int)strlen(title) * 6;
+    g.setCursor(boxX + (boxW - tw) / 2, boxY + 10);
+    g.print(title);
+
+    g.setTextColor(g.color565(255, 220, 220), bg);
+    const char* sub = "REP PENALTY APPLIES";
+    int sw = (int)strlen(sub) * 6;
+    g.setCursor(boxX + (boxW - sw) / 2, boxY + 26);
+    g.print(sub);
+
+    g.setTextColor(g.color565(255, 230, 90), bg);
+    const char* prompt = "ENTER=YES  DEL=NO";
+    int pw = (int)strlen(prompt) * 6;
+    g.setCursor(boxX + (boxW - pw) / 2, boxY + 44);
+    g.print(prompt);
+  }
 }
 
 } // namespace QuestScreen

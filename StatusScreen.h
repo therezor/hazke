@@ -93,8 +93,6 @@ inline void draw(M5Canvas& g, int currentIdx, const GameState& s) {
                            p += snprintf(eq + p, sizeof(eq) - p, "HOLD ");
     if (s.laserTier == 1)  p += snprintf(eq + p, sizeof(eq) - p, "BEAM ");
     if (s.laserTier >= 2)  p += snprintf(eq + p, sizeof(eq) - p, "MIL ");
-    if (s.dockingComputer) p += snprintf(eq + p, sizeof(eq) - p, "DK ");
-    if (s.escapePod)       p += snprintf(eq + p, sizeof(eq) - p, "POD ");
     if (Quest::isActive())
       p += snprintf(eq + p, sizeof(eq) - p, "Q:%s",
                     Quest::typeShort(Quest::active.type));
