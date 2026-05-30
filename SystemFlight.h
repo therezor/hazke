@@ -532,15 +532,15 @@ inline void update(GameState& g, float dt) {
     if (d2 > CollisionRadius * CollisionRadius) continue;
     if (collisionCD <= 0.0f) {
       Combat::damagePlayerHull(g, CollisionDamage);
+      Audio::collisionThump();
       collisionCD = 0.45f;
     }
     sh.hull    -= CollisionDamage;
     sh.provoked = true;
     if (sh.hull <= 0.0f) {
-      Particles::spawnBurst(sh.wx, sh.wy, sh.wz, 0xFD20, 40);
-      sh.active = false;
-      NPCShip::numActive--;
-      if (NPCShip::numActive < 0) NPCShip::numActive = 0;
+      // Ram kills count the same as a clean laser kill: bounty,
+      // kill counter, faction shift, quest progress, rank check.
+      Combat::registerPlayerKill(g, sh);
     }
     // Shove the NPC outward so they don't sit clipped inside the player.
     float dist = sqrtf(d2);

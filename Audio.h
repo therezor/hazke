@@ -126,6 +126,16 @@ inline void rankPromote() {
   M5Cardputer.Speaker.tone(1500.0f, 140);
 }
 
+// Heavy metal-on-metal clang when the player's hull rams another ship.
+// Two short low blasts give it the percussive feel of structural
+// damage, distinct from the softer shieldHit() thump.
+inline void collisionThump() {
+  if (muted) return;
+  M5Cardputer.Speaker.tone(180.0f, 60);
+  M5Cardputer.Speaker.tone(110.0f, 80);
+  M5Cardputer.Speaker.tone( 70.0f, 90);
+}
+
 // Soft "no" buzz for refused actions (low credits, slot full, etc.).
 inline void deny() {
   if (muted) return;

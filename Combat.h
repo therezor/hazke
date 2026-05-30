@@ -85,6 +85,24 @@ inline void tick(float dt) {
   }
 }
 
+// Common bookkeeping for a player-caused NPC kill. Used by laser
+// hits and ramming collisions so a ram counts the same as a clean
+// shot — bounty, kill counter, faction shift, quest progress, rank
+// promotion check, and the death particle burst.
+inline void registerPlayerKill(GameState& g, NPCShip::Ship& sh) {
+  Particles::spawnBurst(sh.wx, sh.wy, sh.wz, 0xFD20, 40);
+  g.kills++;
+  if (sh.role == NPCShip::Role::Pirate) {
+    g.credits += BountyTenthsCR;
+    Quest::onPirateKill(g);
+  }
+  Faction::applyKill(g, sh.role, (Faction::Id)sh.homeFaction);
+  Rank::checkPromotion(g);
+  sh.active = false;
+  NPCShip::numActive--;
+  if (NPCShip::numActive < 0) NPCShip::numActive = 0;
+}
+
 // --- Player → NPC fire ----------------------------------------------------
 inline uint16_t playerColorForTier(uint8_t tier) {
   if (tier == 0) return 0xFD20;  // orange (pulse)
@@ -163,20 +181,7 @@ inline bool tryPlayerFire(GameState& g,
   }
 
   if (sh.hull <= 0.0f) {
-    // Death explosion: fat orange burst at the ship's last position.
-    Particles::spawnBurst(sh.wx, sh.wy, sh.wz, 0xFD20, 40);
-    g.kills++;
-    if (sh.role == NPCShip::Role::Pirate) g.credits += BountyTenthsCR;
-    // R22: every kill shifts reputation with the relevant factions.
-    Faction::applyKill(g, sh.role, (Faction::Id)sh.homeFaction);
-    // R30: patrol quests advance on any pirate kill.
-    if (sh.role == NPCShip::Role::Pirate) Quest::onPirateKill(g);
-    // R24: rank ladder — surface a "PROMOTED" banner if this kill
-    // crossed a tier threshold (banner is rendered by SystemFlight).
-    Rank::checkPromotion(g);
-    sh.active = false;
-    NPCShip::numActive--;
-    if (NPCShip::numActive < 0) NPCShip::numActive = 0;
+    registerPlayerKill(g, sh);
   }
   return true;
 }
