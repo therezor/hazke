@@ -551,6 +551,16 @@ void loop() {
 
     case GameMode::Landed: {
       LandingScreen::tick(dt);
+
+      // R30: a finished quest pops a modal banner over the menu. Block
+      // all normal Landed input (move/select/launch) until the player
+      // acknowledges it with ENTER or ESC.
+      if (Quest::completionPending) {
+        if (mk.enterE || mk.backE) Quest::dismissCompletion();
+        LandingScreen::draw(canvas, game, modePhase);
+        break;
+      }
+
       if (mk.upE)   LandingScreen::moveUp();
       if (mk.downE) LandingScreen::moveDown();
 

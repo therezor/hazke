@@ -37,9 +37,10 @@ namespace Quest {
 
 enum class Type : uint8_t {
   None = 0,
-  Patrol,        // kill N pirates anywhere in this system
-  Delivery,      // deliver N t of commodity to a planet POI in this system
-  VisitPlanet,   // touch down at a specified planet POI in this system
+  Patrol,        // kill N pirates in this system, return home
+  Delivery,      // deliver N t of commodity to a planet POI, return home
+  VisitPlanet,   // pick up something at a planet POI, return home
+  Courier,       // one-way drop at a planet POI — paid on arrival
   Scavenge,      // bring N t of an off-market commodity to the home planet
   Count,
 };
@@ -75,20 +76,17 @@ inline Status status   = Status::Idle;
 // the player has a fixed quota to hunt.
 inline bool pirateSpawnPending = false;
 
-// Completion banner — turnIn() writes it; LandingScreen ticks + renders.
-inline char  completionMsg[40] = "";
-inline float completionTimer   = 0.0f;
+// Completion popup — turnIn() arms it; LandingScreen renders it modally
+// and consumes it when the player presses ENTER (or ESC) to dismiss.
+inline char completionMsg[48]   = "";
+inline bool completionPending   = false;
 
 inline void clearCompletion() {
-  completionMsg[0] = '\0';
-  completionTimer  = 0.0f;
+  completionMsg[0]    = '\0';
+  completionPending   = false;
 }
 
-inline void tickCompletion(float dt) {
-  if (completionTimer <= 0.0f) return;
-  completionTimer -= dt;
-  if (completionTimer < 0.0f) completionTimer = 0.0f;
-}
+inline void dismissCompletion() { clearCompletion(); }
 
 inline void resetAll() {
   active      = Slot{};
@@ -127,9 +125,17 @@ inline const char* typeShort(Type t) {
     case Type::Patrol:      return "PATROL";
     case Type::Delivery:    return "DELIVER";
     case Type::VisitPlanet: return "VISIT";
+    case Type::Courier:     return "COURIER";
     case Type::Scavenge:    return "GATHER";
     default:                return "-";
   }
+}
+
+// One-way quests pay out on arrival at `toPOI` and never require the
+// player to come back to the home planet. Round-trip quests flip to
+// ReadyToTurnIn when the objective is met and only turn in at home.
+inline bool isOneWay(Type t) {
+  return t == Type::Courier;
 }
 
 // ----- Board generation -----
@@ -200,12 +206,13 @@ inline void buildBoard(int sysIdx, int planetPOI, Slot board[BoardSize]) {
     s.progress     = 0;
     s.difficulty   = diff;
 
-    // Pick a type. In single-planet systems we can't do Delivery /
-    // VisitPlanet, so collapse to Patrol / Scavenge.
-    int  roll = (int)(Galaxy::lcg(seed) % 4u);
+    // Pick a type. In single-planet systems we can't pick anything
+    // with a planet-POI target, so collapse those to Patrol / Scavenge.
+    int  roll = (int)(Galaxy::lcg(seed) % 5u);
     Type t    = (Type)(1 + roll);
     if (otherPlanets == 0 &&
-        (t == Type::Delivery || t == Type::VisitPlanet)) {
+        (t == Type::Delivery || t == Type::VisitPlanet ||
+         t == Type::Courier)) {
       t = (roll & 1) ? Type::Patrol : Type::Scavenge;
     }
     s.type = t;
@@ -233,8 +240,17 @@ inline void buildBoard(int sysIdx, int planetPOI, Slot board[BoardSize]) {
       case Type::VisitPlanet:
         s.toPOI = pickPlanetPOI(L, seed, planetPOI);
         s.qty   = 1;
-        base = 400 + diff * 650
+        base = 500 + diff * 700
               + (int)(Galaxy::lcg(seed) % 300u);
+        break;
+      case Type::Courier:
+        s.toPOI = pickPlanetPOI(L, seed, planetPOI);
+        s.qty   = 1;
+        // One-way contract — pays slightly less than VisitPlanet's
+        // round-trip but is finished the moment the player lands at
+        // toPOI, no return trip required.
+        base = 350 + diff * 550
+              + (int)(Galaxy::lcg(seed) % 250u);
         break;
       case Type::Scavenge:
         s.commodity = pickCommodity(sysIdx, seed, /*inStock=*/false);
@@ -258,7 +274,8 @@ inline bool accept(GameState& g, const Slot& s) {
   // Sanity: planet-target quests in a single-planet system would be
   // unwinnable. buildBoard already filters these out, but double-guard
   // here in case a stale board sneaks through.
-  if ((s.type == Type::Delivery || s.type == Type::VisitPlanet) &&
+  if ((s.type == Type::Delivery || s.type == Type::VisitPlanet ||
+       s.type == Type::Courier) &&
       s.toPOI == 0xFF) {
     return false;
   }
@@ -294,12 +311,12 @@ inline void turnIn(GameState& g) {
   Faction::nudge(g, (Faction::Id)fac, nudge);
   Audio::missionComplete();
 
-  // Completion banner shown by LandingScreen for ~2.5 s.
+  // Completion popup body — modal, dismissed only via ENTER/ESC.
   snprintf(completionMsg, sizeof(completionMsg),
-           "QUEST DONE  +%d.%d CR  %s +%d",
+           "+%d.%d CR  %s %+d REP",
            reward / 10, reward % 10,
            Faction::shortName((Faction::Id)fac), (int)nudge);
-  completionTimer = 2.5f;
+  completionPending = true;
 
   active.type        = Type::None;
   status             = Status::Idle;
@@ -358,11 +375,22 @@ inline void onDock(GameState& g, int sysIdx, int planetPOI) {
     }
   }
 
-  // VisitPlanet: simply touching down at the target POI flips status.
+  // VisitPlanet: touching down at the target POI flips to ReadyToTurnIn
+  // — the player still owes a trip home to collect.
   if (status == Status::InProgress &&
       active.type == Type::VisitPlanet &&
       (int)active.toPOI == planetPOI) {
     status = Status::ReadyToTurnIn;
+  }
+
+  // Courier: one-way drop. Landing at the target IS the turn-in — pay
+  // the player out on the spot and clear the quest, no return trip.
+  if (status == Status::InProgress &&
+      active.type == Type::Courier &&
+      (int)active.toPOI == planetPOI) {
+    status = Status::ReadyToTurnIn;
+    turnIn(g);
+    return;
   }
 
   // Home planet — must match BOTH system and POI.
@@ -446,11 +474,25 @@ inline void formatObjective(const Slot& s, char* out, size_t cap) {
     case Type::VisitPlanet: {
       char dst[16];
       planetName(s.fromSys, s.toPOI, dst, sizeof(dst));
+      // Round-trip — narrative implies bringing something *back*.
       static const char* const tpl[4] = {
-        "TAXI PASSENGER TO %s",
-        "FERRY DIPLOMAT TO %s",
-        "COURIER PACKET TO %s",
         "PICK UP CONTACT AT %s",
+        "RECOVER ARTIFACT AT %s",
+        "INSPECT %s SITE",
+        "SCOUT %s INSTALLATION",
+      };
+      snprintf(out, cap, tpl[f], dst);
+      break;
+    }
+    case Type::Courier: {
+      char dst[16];
+      planetName(s.fromSys, s.toPOI, dst, sizeof(dst));
+      // One-way — narrative is a drop-off; payment lands on arrival.
+      static const char* const tpl[4] = {
+        "COURIER PACKET TO %s",
+        "FERRY DIPLOMAT TO %s",
+        "TAXI PASSENGER TO %s",
+        "DELIVER DATA-CHIP TO %s",
       };
       snprintf(out, cap, tpl[f], dst);
       break;
@@ -501,6 +543,12 @@ inline void formatStatus(char* out, size_t cap) {
       char dst[16];
       planetName(active.fromSys, active.toPOI, dst, sizeof(dst));
       snprintf(out, cap, "GO TO %s", dst);
+      break;
+    }
+    case Type::Courier: {
+      char dst[16];
+      planetName(active.fromSys, active.toPOI, dst, sizeof(dst));
+      snprintf(out, cap, "DROP AT %s", dst);
       break;
     }
     case Type::Scavenge:

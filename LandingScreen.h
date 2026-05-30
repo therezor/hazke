@@ -61,10 +61,7 @@ inline void tick(float dt) {
     toast -= dt;
     if (toast < 0.0f) toast = 0.0f;
   }
-  // Quest completion banner ticks here so it always fades out while the
-  // player is sat on the landed screen — even if they never touch the
-  // menu before launching.
-  Quest::tickCompletion(dt);
+  // Quest completion is now a modal popup — no per-frame fade.
 }
 
 inline void flashToast(const char* msg) {
@@ -263,21 +260,40 @@ inline void draw(M5Canvas& g, const GameState& s, float phase) {
     g.print(toastMsg);
   }
 
-  // Quest completion banner — set by Quest::turnIn() when the player
-  // returns to the home planet of an active quest. Rendered as a wide
-  // green strip below the header so it can't be missed.
-  if (Quest::completionTimer > 0.0f && Quest::completionMsg[0]) {
-    float a = Quest::completionTimer > 1.0f
-                ? 1.0f
-                : Quest::completionTimer;
-    uint8_t lum = (uint8_t)(255 * a);
-    uint16_t col = g.color565(lum / 4, lum, lum / 4);
-    g.fillRect(0, 14, Config::ScreenW, 12, g.color565(0, 40, 0));
+  // Modal completion popup — set by Quest::turnIn() when a quest
+  // resolves on planetfall. Drawn last so it sits on top of the menu;
+  // hazke.ino blocks Landed-mode input until ENTER/ESC dismisses it.
+  if (Quest::completionPending) {
+    const int boxW = 200;
+    const int boxH = 60;
+    const int boxX = (Config::ScreenW - boxW) / 2;
+    const int boxY = (Config::ScreenH - boxH) / 2;
+    uint16_t bg     = g.color565(0, 40, 0);
+    uint16_t border = g.color565(80, 220, 80);
+    g.fillRect(boxX, boxY, boxW, boxH, bg);
+    g.drawRect(boxX, boxY, boxW, boxH, border);
+    g.drawRect(boxX + 1, boxY + 1, boxW - 2, boxH - 2, border);
+
     g.setTextSize(1);
-    g.setTextColor(col, g.color565(0, 40, 0));
-    int len = (int)strlen(Quest::completionMsg);
-    g.setCursor((Config::ScreenW - len * 6) / 2, 17);
+    g.setTextColor(border, bg);
+    const char* title = "QUEST COMPLETE";
+    int tw = (int)strlen(title) * 6;
+    g.setCursor(boxX + (boxW - tw) / 2, boxY + 10);
+    g.print(title);
+
+    g.setTextColor(g.color565(220, 255, 220), bg);
+    int mw = (int)strlen(Quest::completionMsg) * 6;
+    g.setCursor(boxX + (boxW - mw) / 2, boxY + 26);
     g.print(Quest::completionMsg);
+
+    // Pulsing prompt so the player knows they have to act.
+    uint8_t lum = (uint8_t)(140 + 100 *
+                            (0.5f + 0.5f * sinf(phase * 4.0f)));
+    g.setTextColor(g.color565(lum, lum, 0), bg);
+    const char* prompt = "PRESS ENTER";
+    int pw = (int)strlen(prompt) * 6;
+    g.setCursor(boxX + (boxW - pw) / 2, boxY + 44);
+    g.print(prompt);
   }
 }
 
