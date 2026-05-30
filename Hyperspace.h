@@ -4,10 +4,9 @@
 
 // Hyperspace mechanics.
 //
-// Fuel has been removed; jumps now cost credits proportional to
-// distance, charged in tenths-CR (matches the rest of the wallet
-// accounting). Destinations are limited to direct gate neighbours — the
-// chart's adjacency graph is the only path between systems.
+// Jumps cost credits proportional to distance, charged in tenths-CR.
+// Destinations are limited to direct gate neighbours — the chart's
+// adjacency graph is the only path between systems.
 
 namespace Hyperspace {
 

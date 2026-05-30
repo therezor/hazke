@@ -12,7 +12,7 @@
 //
 // A Parkan-style still: planet horizon at the bottom, a couple of dome-
 // interior struts framing the view, the planet's name as a header, and a
-// menu of LOCAL MARKET / REFUEL / MISSIONS / LAUNCH. There is no
+// menu of LOCAL MARKET / EQUIP / QUESTS / STATUS / LAUNCH. There is no
 // walk-around — actions are picked from the menu and resolved by the
 // outer state machine in hazke.ino.
 //
@@ -24,8 +24,10 @@ namespace LandingScreen {
 
 // Order matches the switch in hazke.ino's GameMode::Landed handler. With
 // orbital stations gone, this menu is the only docked-services hub —
-// market, refuel, equipment, missions and the commander card all hang
+// market, equipment, quests and the commander card all hang
 // off it. LAUNCH stays last so the player can always tab to it quickly.
+// Repair (hull patch-up) lives inside the EQUIP shop catalog rather
+// than on the landing menu so the shop owns all paid services.
 enum : int {
   ItemMarket = 0,
   ItemEquip,
@@ -45,7 +47,7 @@ inline const char* items[N] = {
 inline int   sysIdx       = 0;
 inline int   planetPOIidx = -1;
 inline int   selected     = 0;
-inline float toast        = 0.0f;    // refuel/missions feedback flash
+inline float toast        = 0.0f;    // landing-menu feedback flash
 inline char  toastMsg[24] = "";
 
 inline void enter(int sys, int poi) {
@@ -205,7 +207,7 @@ inline void draw(M5Canvas& g, const GameState& s, float phase) {
   g.setTextColor(TFT_CYAN, TFT_BLACK);
   g.print(nm);
 
-  // Credits + fuel top-right
+  // Credits top-right.
   char buf[24];
   snprintf(buf, sizeof(buf), "CR %d.%d", s.credits / 10, s.credits % 10);
   int w = (int)strlen(buf) * 6;
@@ -213,8 +215,8 @@ inline void draw(M5Canvas& g, const GameState& s, float phase) {
   g.setCursor(Config::ScreenW - w - 4, 4);
   g.print(buf);
 
-  // Menu — centered. Six rows have to fit above the fuel bar at y=100,
-  // so the per-row pitch is tighter than the old four-row layout.
+  // Menu — centered. Five rows at 11 px pitch fit comfortably between
+  // the planet header and the footer.
   const int firstY = 22;
   const int itemH  = 11;
   for (int i = 0; i < N; i++) {
@@ -249,7 +251,7 @@ inline void draw(M5Canvas& g, const GameState& s, float phase) {
               Config::ScreenH - 9);
   g.print(hint);
 
-  // Toast (REFUEL feedback etc.)
+  // Toast (landing-menu feedback).
   if (toast > 0.0f) {
     float a = toast > 0.6f ? 1.0f : (toast / 0.6f);
     uint8_t lum = (uint8_t)(220 * a);

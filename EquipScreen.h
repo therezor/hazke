@@ -5,25 +5,27 @@
 #include "GameState.h"
 #include "MenuUI.h"
 
-// Refit R18: equipment shop. Reached from LandingScreen → EQUIP.
+// Equipment shop. Reached from LandingScreen → EQUIP.
 //
-// 9 catalog rows. ↑/↓ navigate, ENTER buys the highlighted item, ESC
+// Catalog rows. ↑/↓ navigate, ENTER buys the highlighted item, ESC
 // returns to the docked menu. Status badge on the right of each row
 // shows OWNED / MAX / FULL / etc. so the player can see at a glance
 // what's still buyable. Prices are listed in whole CR but charged in
-// tenths-CR against `game.credits`. REFUEL scales with empty fraction.
+// tenths-CR against `game.credits`. REPAIR HULL is dynamically priced:
+// each press patches up +10% hull for a flat 10 CR.
 
 namespace EquipScreen {
 
 struct Item {
   const char* label;
-  uint16_t    priceCR;   // base price in whole credits; REFUEL is dynamic
+  uint16_t    priceCR;   // base price in whole credits; REPAIR is dynamic
 };
 
-constexpr int N = 7;
+constexpr int N = 8;
 
 enum : int {
-  ItemMissile = 0,
+  ItemRepair = 0,
+  ItemMissile,
   ItemECM,
   ItemLargeHold,
   ItemBeamLaser,
@@ -32,7 +34,13 @@ enum : int {
   ItemEscapePod,
 };
 
+// REPAIR HULL is a per-press service. Each ENTER restores +10% hull
+// and charges `RepairStepCR`; full repair from 0% costs ~100 CR.
+constexpr int   RepairStepCR    = 10;
+constexpr float RepairStepHull  = 0.10f;
+
 inline const Item items[N] = {
+  {"REPAIR HULL", RepairStepCR},
   {"MISSILE",       30},
   {"ECM SYSTEM",   600},
   {"LARGE HOLD",   400},
@@ -62,9 +70,20 @@ inline int priceTenthsFor(int idx, const GameState& /*s*/) {
   return (int)items[idx].priceCR * 10;
 }
 
-// Status string for the right-hand column. "" means buyable.
+// Status string for the right-hand column. "" means buyable. REPAIR
+// uses a per-call static buffer for the "NN%" readout — there's only
+// one repair row per render so re-entrancy isn't an issue.
 inline const char* statusFor(int idx, const GameState& s) {
   switch (idx) {
+    case ItemRepair: {
+      if (s.hull >= 0.999f) return "FULL";
+      static char buf[6];
+      int pct = (int)(s.hull * 100.0f + 0.5f);
+      if (pct < 0)  pct = 0;
+      if (pct > 99) pct = 99;
+      snprintf(buf, sizeof(buf), "%d%%", pct);
+      return buf;
+    }
     case ItemMissile:    return (s.missiles >= 4)              ? "MAX 4"     : "";
     case ItemECM:        return s.ecm                          ? "OWNED"     : "";
     case ItemLargeHold:  return (s.cargoMax >= s.CargoMaxLarge) ? "OWNED"     : "";
@@ -79,6 +98,10 @@ inline const char* statusFor(int idx, const GameState& s) {
 
 inline void apply(int idx, GameState& s) {
   switch (idx) {
+    case ItemRepair:
+      s.hull += RepairStepHull;
+      if (s.hull > 1.0f) s.hull = 1.0f;
+      break;
     case ItemMissile:    s.missiles++;                  break;
     case ItemECM:        s.ecm = true;                  break;
     case ItemLargeHold:  s.cargoMax = s.CargoMaxLarge;  break;
@@ -91,6 +114,12 @@ inline void apply(int idx, GameState& s) {
 
 inline bool tryBuy(GameState& s) {
   int idx = selected;
+  // Repair has a numeric status badge — handle its "already full" case
+  // explicitly instead of leaning on the string-compare cascade below.
+  if (idx == ItemRepair && s.hull >= 0.999f) {
+    flashToast("HULL ALREADY FULL");
+    return false;
+  }
   const char* st = statusFor(idx, s);
   if (strcmp(st, "OWNED")     == 0) { flashToast("ALREADY OWNED");    return false; }
   if (strcmp(st, "MAX 4")     == 0) { flashToast("MISSILE RACK FULL"); return false; }
@@ -101,7 +130,7 @@ inline bool tryBuy(GameState& s) {
 
   s.credits -= price;
   apply(idx, s);
-  flashToast("PURCHASED");
+  flashToast(idx == ItemRepair ? "HULL PATCHED" : "PURCHASED");
   return true;
 }
 
