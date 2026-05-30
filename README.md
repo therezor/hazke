@@ -68,7 +68,13 @@ From there you can:
   in the same system, and fly back to A for payment.
 - **Hunt.** Kill pirates for bounties and reputation with lawful
   factions. Patrol quests force a fixed pirate roster to spawn after
-  launch, so the hunt is winnable even in peaceful systems.
+  launch, so the hunt is winnable even in peaceful systems. NPCs are
+  slower than you at full throttle, so you can always either outrun a
+  fight or close in on a wounded one. Damage thresholds apply to both
+  sides: below 50% hull engines drop to half thrust, below 25% hull
+  weapons go offline. A ship that's been beaten below 25% can no
+  longer shoot back — `H` then opens a loot dialog where you grab its
+  cargo for free.
 - **Travel.** Pay 10 CR per LY at a jump gate to hyperspace to a
   neighbouring system. Only direct gate links are reachable; the
   galaxy is a graph, not a free-distance grid.
@@ -188,7 +194,7 @@ Reached from the docked menu (`EQUIP`). All purchases debit
 | Item        | Price | Effect |
 |-------------|-------|--------|
 | REPAIR HULL   | 10 CR per +10% | Patches hull damage (full repair = ~100 CR). |
-| REPAIR SHIELD | 5 CR per +10%  | Charges the shield (also brings a fully-depleted shield back online). |
+| REPAIR SHIELD | 100 CR         | One-shot full recharge — required after depletion. |
 | MISSILE     | 30 CR each, cap 4 | Adds one homing missile. |
 | ECM SYSTEM  | 600 CR | Enables the ECM burst (one-time install). |
 | LARGE HOLD  | 400 CR | Cargo capacity 20 t → 35 t. |

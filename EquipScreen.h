@@ -37,17 +37,16 @@ enum : int {
 
 // REPAIR HULL is a per-press service. Each ENTER restores +10% hull
 // and charges `RepairStepCR`; full repair from 0% costs ~100 CR.
-// REPAIR SHIELD works the same way — flat 5 CR per +10% step, and is
-// also the only way to bring shields back online after they've been
-// fully depleted (depleted shields no longer regen on their own).
+// REPAIR SHIELD is a one-shot 100 CR service that recharges the
+// shield to full — it's the only way to bring it back online after
+// depletion (depleted shields no longer regen on their own).
 constexpr int   RepairStepCR        = 10;
 constexpr float RepairStepHull      = 0.10f;
-constexpr int   RepairShieldStepCR  = 5;
-constexpr float RepairStepShield    = 0.10f;
+constexpr int   RepairShieldCR      = 100;
 
 inline const Item items[N] = {
   {"REPAIR HULL",   RepairStepCR},
-  {"REPAIR SHIELD", RepairShieldStepCR},
+  {"REPAIR SHIELD", RepairShieldCR},
   {"MISSILE",       30},
   {"ECM SYSTEM",   600},
   {"LARGE HOLD",   400},
@@ -119,8 +118,7 @@ inline void apply(int idx, GameState& s) {
       if (s.hull > 1.0f) s.hull = 1.0f;
       break;
     case ItemRepairShield:
-      s.shield += RepairStepShield;
-      if (s.shield > 1.0f) s.shield = 1.0f;
+      s.shield = 1.0f;
       break;
     case ItemMissile:    s.missiles++;                  break;
     case ItemECM:        s.ecm = true;                  break;

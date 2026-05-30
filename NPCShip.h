@@ -19,7 +19,10 @@
 namespace NPCShip {
 
 constexpr int   MaxNPCs       = 4;
-constexpr float CruiseSpeed   = 700.0f;   // sysu/s
+// Both cruise and pursue speeds sit below the player's MaxSpeed (600
+// sysu/s in SystemFlight) so a full-throttle player can always either
+// run away from a fight or close in on a wounded ship for boarding.
+constexpr float CruiseSpeed   = 420.0f;   // sysu/s
 constexpr float ArriveRadius  = 900.0f;   // sysu — pick a new dest within
 constexpr float HailRange     = 700.0f;   // sysu — player can hail within
 constexpr float TurnRate      = 1.2f;     // rad/s yaw lerp
@@ -28,13 +31,13 @@ constexpr float TurnRate      = 1.2f;     // rad/s yaw lerp
 constexpr float DetectRange   = 4000.0f;  // sysu — pirates aggro inside
 constexpr float FireRange     = 2400.0f;  // sysu — must reach the orbit ring
 constexpr float FireConeRad   = 0.35f;    // ~20° half-angle for fire cone
-constexpr float PursueSpeed   = 820.0f;   // sysu/s — pirates fly a touch faster
+constexpr float PursueSpeed   = 520.0f;   // sysu/s — still faster than cruise
 constexpr float PursueTurn    = 1.8f;     // rad/s — and turn harder
 // Stand-off ring: hostiles ease into a band around the player and orbit
 // it laterally instead of parking nose-to-nose for a still-frame duel.
 constexpr float StandoffRange = 2200.0f;  // outer edge of the ring
 constexpr float StandoffInner = 1500.0f;  // closer than this and we back off
-constexpr float OrbitSpeed    = 380.0f;   // sysu/s lateral drift while orbiting
+constexpr float OrbitSpeed    = 300.0f;   // sysu/s lateral drift while orbiting
 
 using Galaxy::lcg;
 
@@ -358,9 +361,11 @@ inline bool wander(const SolarSystem::Layout& L, Ship& sh,
   float fx = sy * cp;
   float fy = sp;
   float fz = cy * cp;
-  sh.wx += fx * CruiseSpeed * dt;
-  sh.wy += fy * CruiseSpeed * dt;
-  sh.wz += fz * CruiseSpeed * dt;
+  // Damaged ships limp along at half cruise too (mirrors the pursue path).
+  float spd = (sh.hull < 0.5f) ? (CruiseSpeed * 0.5f) : CruiseSpeed;
+  sh.wx += fx * spd * dt;
+  sh.wy += fy * spd * dt;
+  sh.wz += fz * spd * dt;
   return true;
 }
 
@@ -397,6 +402,11 @@ inline void update(const SolarSystem::Layout& L, float dt,
     bool huntsPlayer = (sh.role == Role::Pirate)
                     || (sh.role == Role::Patrol && patrolHostile[i])
                     || sh.provoked;
+    // Hull damage cripples the engines: below 50% hull a ship can only
+    // muster half thrust. Combined with NPCs being slower than the
+    // player at full throttle, this is what lets a winged ship be run
+    // down for boarding (or run away from when the player's the wounded one).
+    float speedMul = (sh.hull < 0.5f) ? 0.5f : 1.0f;
     if (huntsPlayer) {
       float dx = playerX - sh.wx;
       float dy = playerY - sh.wy;
@@ -442,6 +452,8 @@ inline void update(const SolarSystem::Layout& L, float dt,
         // Right vector in the XZ plane (90° CW from forward yaw).
         float rxw =  cosf(sh.yaw);
         float rzw = -sinf(sh.yaw);
+        spd        *= speedMul;
+        lateralSpd *= speedMul;
         sh.wx += (fx * spd + rxw * lateralSpd) * dt;
         sh.wy +=  fy * spd * dt;
         sh.wz += (fz * spd + rzw * lateralSpd) * dt;
@@ -475,14 +487,26 @@ inline bool anyPirateAttacking() {
   return false;
 }
 
-// Returns the index of the nearest NPC within HailRange of the player,
-// or -1 if none. The SystemFlight loop uses this to gate the H prompt
-// and the actual hail action.
+// True if the player can currently open a hail/loot dialog with this
+// ship. Traders are always hailable (they have goods for sale).
+// Anything else has to be wounded first — hull below the critical
+// firing threshold means the gunnery is dead and the engines are at
+// half thrust, which is when a player can actually run it down and
+// board it, Parkan-style.
+inline bool isHailable(const Ship& sh) {
+  if (!sh.active) return false;
+  if (sh.role == Role::Trader) return true;
+  return sh.hull < 0.25f && sh.hull > 0.0f;
+}
+
+// Returns the index of the nearest hailable NPC within HailRange of
+// the player, or -1 if none. The SystemFlight loop uses this to gate
+// the H prompt and the actual hail action.
 inline int hailIdx(float px, float py, float pz) {
   int   best   = -1;
   float bestD2 = HailRange * HailRange;
   for (int i = 0; i < MaxNPCs; i++) {
-    if (!ships[i].active) continue;
+    if (!isHailable(ships[i])) continue;
     float dx = ships[i].wx - px;
     float dy = ships[i].wy - py;
     float dz = ships[i].wz - pz;

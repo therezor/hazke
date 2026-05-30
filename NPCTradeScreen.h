@@ -33,6 +33,10 @@ inline uint8_t  npcStock[Slots]  = {0, 0, 0};
 inline char     traderName[16]   = "";
 inline float    toast            = 0.0f;
 inline char     toastMsg[24]     = "";
+// Loot mode: set when the hailed ship isn't a Trader. Items are
+// free (askPrice=0), there's no bid (player can't sell back), and
+// the header reads LOOT instead of TRADER.
+inline bool     lootMode         = false;
 
 inline void flashToast(const char* msg) {
   strncpy(toastMsg, msg, sizeof(toastMsg));
@@ -52,25 +56,43 @@ inline void enter(int sys, int npcIdx, uint32_t hailSeed) {
   shipIdx  = npcIdx;
   selected = 0;
   toast    = 0.0f;
+  // Decide trade vs. loot mode from the hailed ship's role.
+  lootMode = false;
+  if (npcIdx >= 0 && npcIdx < NPCShip::MaxNPCs) {
+    lootMode = NPCShip::ships[npcIdx].role != NPCShip::Role::Trader;
+  }
   uint32_t s = hailSeed ^ 0xA5A5A5A5u;
   for (int i = 0; i < Slots; i++) {
     int c = (int)(Galaxy::lcg(s) % (uint32_t)Market::N);
     commodity[i] = c;
-    uint16_t base = Market::priceAt(sysIdx, c);
-    // Two-tier spread: NPCs ask 5-30% over base, bid 5-25% under.
-    int askPct = 5 + (int)(Galaxy::lcg(s) % 26);
-    int bidPct = 5 + (int)(Galaxy::lcg(s) % 21);
-    int ask = (int)base + ((int)base * askPct) / 100;
-    int bid = (int)base - ((int)base * bidPct) / 100;
-    if (ask < 1)   ask = 1;
-    if (bid < 1)   bid = 1;
-    if (ask > 9999) ask = 9999;
-    askPrice[i]  = (uint16_t)ask;
-    bidPrice[i]  = (uint16_t)bid;
-    npcStock[i]  = (uint8_t)(2 + (Galaxy::lcg(s) % 8));   // 2..9 tons
+    if (lootMode) {
+      // Loot is a free scratch in the wreck's hold — no prices, small
+      // stacks. Some slots come up empty so loot quality varies.
+      askPrice[i]  = 0;
+      bidPrice[i]  = 0;
+      npcStock[i]  = (uint8_t)(Galaxy::lcg(s) % 3);   // 0..2 tons
+    } else {
+      uint16_t base = Market::priceAt(sysIdx, c);
+      // Two-tier spread: NPCs ask 5-30% over base, bid 5-25% under.
+      int askPct = 5 + (int)(Galaxy::lcg(s) % 26);
+      int bidPct = 5 + (int)(Galaxy::lcg(s) % 21);
+      int ask = (int)base + ((int)base * askPct) / 100;
+      int bid = (int)base - ((int)base * bidPct) / 100;
+      if (ask < 1)   ask = 1;
+      if (bid < 1)   bid = 1;
+      if (ask > 9999) ask = 9999;
+      askPrice[i]  = (uint16_t)ask;
+      bidPrice[i]  = (uint16_t)bid;
+      npcStock[i]  = (uint8_t)(2 + (Galaxy::lcg(s) % 8));   // 2..9 tons
+    }
   }
-  snprintf(traderName, sizeof(traderName), "TRADER #%03u",
-           (unsigned)(hailSeed % 1000u));
+  if (lootMode) {
+    snprintf(traderName, sizeof(traderName), "LOOT #%03u",
+             (unsigned)(hailSeed % 1000u));
+  } else {
+    snprintf(traderName, sizeof(traderName), "TRADER #%03u",
+             (unsigned)(hailSeed % 1000u));
+  }
 }
 
 inline void moveUp()   { selected = (selected - 1 + Slots) % Slots; }
@@ -82,20 +104,26 @@ inline void moveDown() { selected = (selected + 1) % Slots; }
 
 inline bool tryBuy(GameState& gs) {
   int i = selected;
-  if (npcStock[i] == 0)         { flashToast("NPC EMPTY");   return false; }
+  if (npcStock[i] == 0)         { flashToast(lootMode ? "EMPTY" : "NPC EMPTY"); return false; }
   if (gs.cargoFree() <= 0)      { flashToast("HOLD FULL");   return false; }
   if (gs.credits < askPrice[i]) { flashToast("LOW CREDITS"); return false; }
   if (gs.buyOne(commodity[i], npcStock[i], askPrice[i])) {
     npcStock[i]--;
-    if (shipIdx >= 0 && shipIdx < NPCShip::MaxNPCs) {
+    // No reputation gain for picking goods off a cracked-open hulk —
+    // only legitimate trade nudges standing.
+    if (!lootMode && shipIdx >= 0 && shipIdx < NPCShip::MaxNPCs) {
       Faction::nudge(gs, (Faction::Id)NPCShip::ships[shipIdx].homeFaction, +1);
     }
+    if (lootMode) flashToast("LOOTED");
     return true;
   }
   return false;
 }
 
 inline bool trySell(GameState& gs) {
+  // A pirate/patrol with broken shields isn't going to pay you for
+  // cargo — only proper traders run a two-way deal.
+  if (lootMode) { flashToast("NO BIDS"); return false; }
   int i = selected;
   if (gs.cargo[commodity[i]] == 0) { flashToast("NONE IN HOLD"); return false; }
   if (gs.sellOne(commodity[i], bidPrice[i])) {
@@ -113,9 +141,10 @@ inline void draw(M5Canvas& g, const GameState& gs) {
 
   // Header
   g.setTextSize(1);
-  g.setTextColor(TFT_YELLOW, TFT_BLACK);
+  uint16_t headCol = lootMode ? TFT_RED : TFT_YELLOW;
+  g.setTextColor(headCol, TFT_BLACK);
   g.setCursor(4, 4);
-  g.print("HAIL  ");
+  g.print(lootMode ? "LOOT  " : "HAIL  ");
   g.setTextColor(TFT_WHITE, TFT_BLACK);
   g.print(traderName);
 
@@ -150,13 +179,18 @@ inline void draw(M5Canvas& g, const GameState& gs) {
     g.setCursor(4, y);
     g.print(Market::itemAt(commodity[i]).name);
 
-    snprintf(buf, sizeof(buf), "%d.%d",
-             askPrice[i] / 10, askPrice[i] % 10);
-    g.setCursor(104, y); g.print(buf);
+    if (lootMode) {
+      g.setCursor(104, y); g.print("FREE");
+      g.setCursor(142, y); g.print("--");
+    } else {
+      snprintf(buf, sizeof(buf), "%d.%d",
+               askPrice[i] / 10, askPrice[i] % 10);
+      g.setCursor(104, y); g.print(buf);
 
-    snprintf(buf, sizeof(buf), "%d.%d",
-             bidPrice[i] / 10, bidPrice[i] % 10);
-    g.setCursor(142, y); g.print(buf);
+      snprintf(buf, sizeof(buf), "%d.%d",
+               bidPrice[i] / 10, bidPrice[i] % 10);
+      g.setCursor(142, y); g.print(buf);
+    }
 
     snprintf(buf, sizeof(buf), "%2u", (unsigned)npcStock[i]);
     g.setCursor(180, y); g.print(buf);
@@ -168,7 +202,9 @@ inline void draw(M5Canvas& g, const GameState& gs) {
   // Footer
   g.drawFastHLine(0, Config::ScreenH - 12, Config::ScreenW, TFT_DARKGREY);
   g.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  const char* hint = "UP/DN  RIGHT=BUY  LEFT=SELL  ESC";
+  const char* hint = lootMode
+                       ? "UP/DN  RIGHT=TAKE  ESC"
+                       : "UP/DN  RIGHT=BUY  LEFT=SELL  ESC";
   g.setCursor((Config::ScreenW - (int)strlen(hint) * 6) / 2,
               Config::ScreenH - 9);
   g.print(hint);

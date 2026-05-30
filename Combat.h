@@ -107,6 +107,9 @@ inline bool tryPlayerFire(GameState& g,
                           float px, float py, float pz,
                           float fx, float fy, float fz) {
   if (playerCooldown > 0.0f)      return false;
+  // Critically wounded — gunnery is offline below 25% hull. Matches
+  // the same rule applied to NPCs in updateNPCs.
+  if (g.hull < 0.25f)             return false;
   uint8_t t = g.laserTier < 3 ? g.laserTier : 2;
   playerCooldown = PlayerFireCDByTier[t];
 
@@ -213,9 +216,12 @@ inline void updateNPCs(GameState& g, float dt) {
 
     // Pirates fire when in attack cone. Provoked ships (any role the
     // player has shot) fire the same way. Otherwise the ship is
-    // peaceful and just keeps its cooldown topped up.
+    // peaceful and just keeps its cooldown topped up. Critically
+    // wounded ships (hull < 25%) can no longer fire — their gunnery
+    // systems are wrecked along with the rest of the hull.
     bool canFire = sh.attacking &&
-                   (sh.role == NPCShip::Role::Pirate || sh.provoked);
+                   (sh.role == NPCShip::Role::Pirate || sh.provoked) &&
+                   sh.hull >= 0.25f;
     if (!canFire) {
       sh.fireTimer = NPCFireCD;
       continue;

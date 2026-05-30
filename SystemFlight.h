@@ -413,7 +413,10 @@ inline void update(GameState& g, float dt) {
   }
   renormalize();
 
-  float v = g.speed * MaxSpeed;
+  // Hull damage cripples engines the same way it does for NPCs: below
+  // 50% hull the ship can only manage half thrust.
+  float speedMul = (g.hull < 0.5f) ? 0.5f : 1.0f;
+  float v = g.speed * MaxSpeed * speedMul;
   state.px += state.fx * v * dt;
   state.py += state.fy * v * dt;
   state.pz += state.fz * v * dt;
@@ -1399,12 +1402,14 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     g.setTextColor(TFT_MAGENTA, TFT_BLACK);
     g.setCursor(x, Config::ViewY + 3);
     g.print(tag);
-  } else if (NPCShip::hailIdx(state.px, state.py, state.pz) >= 0) {
-    // R16: an NPC trader is within HailRange — invite a hail.
-    const char* tag = "H=HAIL";
+  } else if (int hi = NPCShip::hailIdx(state.px, state.py, state.pz); hi >= 0) {
+    // A hailable NPC is in range. Traders → trade; anything else has
+    // been shield-cracked and offers free loot (Parkan-style).
+    bool loot = NPCShip::ships[hi].role != NPCShip::Role::Trader;
+    const char* tag = loot ? "H=LOOT" : "H=HAIL";
     int w = 6 * 6;
     int x = Config::ViewX + (Config::ViewW - w) / 2;
-    g.setTextColor(TFT_YELLOW, TFT_BLACK);
+    g.setTextColor(loot ? TFT_RED : TFT_YELLOW, TFT_BLACK);
     g.setCursor(x, Config::ViewY + 3);
     g.print(tag);
   } else if (inBelt()) {

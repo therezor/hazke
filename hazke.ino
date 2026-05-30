@@ -343,7 +343,7 @@ void loop() {
       if (mk.lockE && !SystemFlight::state.warping) {
         SystemFlight::cycleLock();
       }
-      if (mk.missileE && !SystemFlight::state.warping) {
+      if (mk.missileE && !SystemFlight::state.warping && game.hull >= 0.25f) {
         if (game.missiles > 0 && SystemFlight::state.lockedNPC >= 0) {
           if (Missile::spawnPlayer(SystemFlight::state.px,
                                    SystemFlight::state.py,

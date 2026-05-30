@@ -137,6 +137,12 @@ inline void tickPirateLaunches(GameState& g, float dt) {
       sh.missileTimer = PiratePoll;
       continue;
     }
+    // Critically wounded ships can't launch missiles either — same
+    // rule as the laser-fire gate in Combat::updateNPCs.
+    if (sh.hull < 0.25f) {
+      sh.missileTimer = PiratePoll;
+      continue;
+    }
     sh.missileTimer -= dt;
     if (sh.missileTimer > 0.0f) continue;
     sh.missileTimer = PiratePoll;
