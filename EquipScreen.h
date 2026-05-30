@@ -21,10 +21,11 @@ struct Item {
   uint16_t    priceCR;   // base price in whole credits; REPAIR is dynamic
 };
 
-constexpr int N = 8;
+constexpr int N = 9;
 
 enum : int {
   ItemRepair = 0,
+  ItemRepairShield,
   ItemMissile,
   ItemECM,
   ItemLargeHold,
@@ -36,11 +37,17 @@ enum : int {
 
 // REPAIR HULL is a per-press service. Each ENTER restores +10% hull
 // and charges `RepairStepCR`; full repair from 0% costs ~100 CR.
-constexpr int   RepairStepCR    = 10;
-constexpr float RepairStepHull  = 0.10f;
+// REPAIR SHIELD works the same way — flat 5 CR per +10% step, and is
+// also the only way to bring shields back online after they've been
+// fully depleted (depleted shields no longer regen on their own).
+constexpr int   RepairStepCR        = 10;
+constexpr float RepairStepHull      = 0.10f;
+constexpr int   RepairShieldStepCR  = 5;
+constexpr float RepairStepShield    = 0.10f;
 
 inline const Item items[N] = {
-  {"REPAIR HULL", RepairStepCR},
+  {"REPAIR HULL",   RepairStepCR},
+  {"REPAIR SHIELD", RepairShieldStepCR},
   {"MISSILE",       30},
   {"ECM SYSTEM",   600},
   {"LARGE HOLD",   400},
@@ -84,6 +91,15 @@ inline const char* statusFor(int idx, const GameState& s) {
       snprintf(buf, sizeof(buf), "%d%%", pct);
       return buf;
     }
+    case ItemRepairShield: {
+      if (s.shield >= 0.999f) return "FULL";
+      static char sbuf[6];
+      int pct = (int)(s.shield * 100.0f + 0.5f);
+      if (pct < 0)  pct = 0;
+      if (pct > 99) pct = 99;
+      snprintf(sbuf, sizeof(sbuf), "%d%%", pct);
+      return sbuf;
+    }
     case ItemMissile:    return (s.missiles >= 4)              ? "MAX 4"     : "";
     case ItemECM:        return s.ecm                          ? "OWNED"     : "";
     case ItemLargeHold:  return (s.cargoMax >= s.CargoMaxLarge) ? "OWNED"     : "";
@@ -101,6 +117,10 @@ inline void apply(int idx, GameState& s) {
     case ItemRepair:
       s.hull += RepairStepHull;
       if (s.hull > 1.0f) s.hull = 1.0f;
+      break;
+    case ItemRepairShield:
+      s.shield += RepairStepShield;
+      if (s.shield > 1.0f) s.shield = 1.0f;
       break;
     case ItemMissile:    s.missiles++;                  break;
     case ItemECM:        s.ecm = true;                  break;
@@ -120,6 +140,10 @@ inline bool tryBuy(GameState& s) {
     flashToast("HULL ALREADY FULL");
     return false;
   }
+  if (idx == ItemRepairShield && s.shield >= 0.999f) {
+    flashToast("SHIELD ALREADY FULL");
+    return false;
+  }
   const char* st = statusFor(idx, s);
   if (strcmp(st, "OWNED")     == 0) { flashToast("ALREADY OWNED");    return false; }
   if (strcmp(st, "MAX 4")     == 0) { flashToast("MISSILE RACK FULL"); return false; }
@@ -130,7 +154,10 @@ inline bool tryBuy(GameState& s) {
 
   s.credits -= price;
   apply(idx, s);
-  flashToast(idx == ItemRepair ? "HULL PATCHED" : "PURCHASED");
+  const char* msg = "PURCHASED";
+  if (idx == ItemRepair)       msg = "HULL PATCHED";
+  if (idx == ItemRepairShield) msg = "SHIELD CHARGED";
+  flashToast(msg);
   return true;
 }
 

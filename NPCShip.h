@@ -383,8 +383,11 @@ inline void update(const SolarSystem::Layout& L, float dt,
     if (!sh.active) continue;
 
     // Slow shield regen mirrors the player's — ~37 s full recharge.
+    // Once shields collapse to 0 they stay down for the rest of this
+    // ship's life (matches the player rule — depleted shields don't
+    // self-repair, the ship has to die or land to reset).
     // Hull stays burnt-in until the ship dies.
-    if (sh.shields < 1.0f) {
+    if (sh.shields > 0.0f && sh.shields < 1.0f) {
       sh.shields += 0.0267f * dt;
       if (sh.shields > 1.0f) sh.shields = 1.0f;
     }

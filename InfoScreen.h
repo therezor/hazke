@@ -18,7 +18,7 @@ inline void draw(M5Canvas& g) {
     {"E / S",    "Accel / brake"},
     {"W",        "Fire laser"},
     {"R / A",    "Lock / fire missile"},
-    {"E (tap)",  "ECM blast"},
+    {"Q",        "ECM blast"},
     {"M",        "System map"},
     {"ESC",      "Back / title"},
   };

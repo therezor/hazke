@@ -39,15 +39,14 @@ device.
 |--------------------|--------|
 | `;` / `.` (↑ / ↓)  | Pitch up / down |
 | `,` / `/` (← / →)  | Roll left / right |
-| `E`                | Accelerate (tap to fire ECM if installed) |
+| `E`                | Accelerate |
 | `S`                | Brake |
 | `W` or `Space`     | Fire laser |
 | `R`                | Cycle missile lock |
 | `A`                | Fire missile at current lock |
+| `Q`                | Fire ECM burst (if installed) |
 | `Tab`              | Cycle target POI |
-| `L`                | Land on nearby planet |
 | `H`                | Hail nearby NPC trader |
-| `J`                | Engage hyperspace (only inside a gate) |
 | `M`                | Open local system map |
 | `Enter`            | Confirm in menus |
 | `Backspace` / `` ` `` | Back / pause |
@@ -112,11 +111,11 @@ system always looks the same.
 
 The cockpit shows a starfield, HUD bars (shield, hull, heat,
 throttle, laser cooldown), a 3D radar of nearby ships and POIs, and a
-mode banner stack for contextual prompts (`L=LAND`, `J=JUMP`,
-`H=HAIL`, `BELT`, `WARP`, `HEAT!`).
+mode banner stack for contextual prompts (`H=HAIL`, `BELT`, `WARP`,
+`ENTER GATE`, `HEAT!`). Landing on a planet and jumping at a gate are
+automatic — drift into range and the screen hand-off fires itself.
 
-Pressing `Tab` cycles a target POI; `J` while inside a gate ring
-fires the witchspace cinematic.
+Pressing `Tab` cycles a target POI.
 
 ### Combat
 
@@ -128,7 +127,9 @@ fires the witchspace cinematic.
 - **ECM** is unlimited but cooldown-throttled, blanketing incoming
   missiles in a single burst.
 - **Shields** absorb damage first and regenerate slowly (~37 s for a
-  full top-up). **Hull** only goes down — repair it at the EQUIP shop.
+  full top-up) **while still active** — once a shield is depleted to
+  0 it stays down until you buy `REPAIR SHIELD` at the EQUIP shop.
+  **Hull** only goes down — repair it the same way.
 - **Sun heat** builds while skimming the star. Past 1.0 hullHeat
   forward shields drain, then aft. A `HEAT!` banner blinks faster
   as you approach the threshold.
@@ -186,7 +187,8 @@ Reached from the docked menu (`EQUIP`). All purchases debit
 
 | Item        | Price | Effect |
 |-------------|-------|--------|
-| REPAIR HULL | 10 CR per +10% | Patches hull damage (full repair = ~100 CR). |
+| REPAIR HULL   | 10 CR per +10% | Patches hull damage (full repair = ~100 CR). |
+| REPAIR SHIELD | 5 CR per +10%  | Charges the shield (also brings a fully-depleted shield back online). |
 | MISSILE     | 30 CR each, cap 4 | Adds one homing missile. |
 | ECM SYSTEM  | 600 CR | Enables the ECM burst (one-time install). |
 | LARGE HOLD  | 400 CR | Cargo capacity 20 t → 35 t. |

@@ -54,7 +54,7 @@ struct MenuInput {
   bool hailE;     // R16: hail a nearby NPC trader ('h')
   bool lockE;     // R21: cycle missile lock onto next NPC in front ('r')
   bool missileE;  // R21: fire a missile at the current lock ('a')
-  bool ecmE;      // R21: trigger ECM blast ('e' tap; held 'e' still accels)
+  bool ecmE;      // R21: trigger ECM blast ('q')
   bool mapE;      // 'm' — open the local system map from flight
 };
 
@@ -94,7 +94,7 @@ inline MenuInput pollMenuInput() {
         case 'r': lock    = true; break;
         case 'a': missile = true; break;
         case 'm': map     = true; break;
-        case 'e': ecm     = true; break;
+        case 'q': ecm     = true; break;
         default: break;
       }
     }

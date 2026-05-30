@@ -10,7 +10,7 @@
 //   E / S                       accelerate / brake
 //   W                           fire laser
 //   R / A                       lock / fire missile
-//   E (tap)                     ECM blast
+//   Q                           ECM blast
 //   M                           local system map (chart opens at the gate)
 //   ENTER                       confirm / select (menu)
 //   `                           back / title
@@ -239,6 +239,14 @@ void loop() {
       if (game.ecmCooldown > 0.0f) {
         game.ecmCooldown -= dt;
         if (game.ecmCooldown < 0.0f) game.ecmCooldown = 0.0f;
+      }
+      // Shield regen — only while still active. Once the shield collapses
+      // to 0 it stays down until the player buys REPAIR SHIELD at a
+      // station, so a depleted shield is a real penalty, not a brief lull.
+      // Rate (~0.027/s → ~37 s for a full recharge) mirrors NPCShip's.
+      if (game.shield > 0.0f && game.shield < 1.0f) {
+        game.shield += 0.0267f * dt;
+        if (game.shield > 1.0f) game.shield = 1.0f;
       }
       if (!SystemFlight::state.warping && !SystemFlight::state.dying) {
         Combat::updateNPCs(game, dt);
