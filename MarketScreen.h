@@ -8,6 +8,7 @@
 #include "GameState.h"
 #include "Faction.h"
 #include "MenuUI.h"
+#include "Quest.h"
 
 // Day 4: commodity market UI.
 
@@ -26,14 +27,38 @@ inline int scroll = 0;
 
 inline uint8_t localQty[Market::N];
 inline int     localSys = -1;
+inline int     localPOI = -1;
 
-inline void enter(int sysIdx) {
-  if (sysIdx != localSys) {
+// Active fetch-contract stock rule: the contracted commodity is never
+// sold at the planet that posted the quest, and every OTHER planet in
+// the system stocks at least the contracted amount so the run is always
+// completable. The zero-at-home half re-applies on every visit (the
+// quest may have been accepted after this planet's stock was cached);
+// the availability boost only runs on a fresh cache so re-entering the
+// market can't restock what the player already bought.
+inline void applyQuestStock(int sysIdx, int planetPOI, bool fresh) {
+  if (!Quest::isActive())                         return;
+  if (Quest::status != Quest::Status::InProgress) return;
+  const Quest::Slot& q = Quest::active;
+  if ((int)q.fromSys != sysIdx)                   return;
+  if (q.commodity >= (uint8_t)Market::N)          return;
+  if ((int)q.fromPOI == planetPOI) {
+    localQty[q.commodity] = 0;
+  } else if (fresh && localQty[q.commodity] < q.qty) {
+    localQty[q.commodity] = q.qty;
+  }
+}
+
+inline void enter(int sysIdx, int planetPOI) {
+  bool fresh = (sysIdx != localSys) || (planetPOI != localPOI);
+  if (fresh) {
     for (int i = 0; i < (int)Market::N; i++) {
-      localQty[i] = Market::qtyAt(sysIdx, i);
+      localQty[i] = Market::qtyAtPlanet(sysIdx, planetPOI, i);
     }
     localSys = sysIdx;
+    localPOI = planetPOI;
   }
+  applyQuestStock(sysIdx, planetPOI, fresh);
 }
 
 inline void moveCursor(int delta) {

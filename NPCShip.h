@@ -212,7 +212,10 @@ inline void spawnFor(int sysIdx, const SolarSystem::Layout& L) {
     sh.destPOI = (dest >= 0) ? dest : home;
     const auto& src = L.poi[home];
     float ang  = (float)(lcg(s) & 0xFFFFu) * (6.2831853f / 65536.0f);
-    float offR = 400.0f + (float)(lcg(s) & 0xFFFFu) / 65536.0f * 600.0f;
+    // Offset starts past the body's surface so a ship can't spawn
+    // inside (or skimming) a large planet.
+    float offR = (float)src.radius + 400.0f
+               + (float)(lcg(s) & 0xFFFFu) / 65536.0f * 600.0f;
     sh.wx = (float)src.x + cosf(ang) * offR;
     sh.wy = (float)src.y;
     sh.wz = (float)src.z + sinf(ang) * offR;
@@ -293,7 +296,7 @@ inline void ensurePirates(int want, int sysIdx,
     if (spawn >= 0) {
       const auto& src = L.poi[spawn];
       float ang  = (float)(lcg(s) & 0xFFFFu) * (6.2831853f / 65536.0f);
-      float offR = 3000.0f
+      float offR = (float)src.radius + 3000.0f
                  + (float)(lcg(s) & 0xFFFFu) / 65536.0f * 1500.0f;
       sh.wx = (float)src.x + cosf(ang) * offR;
       sh.wy = (float)src.y;
@@ -347,7 +350,10 @@ inline bool wander(const SolarSystem::Layout& L, Ship& sh,
   float dy = (float)dst.y - sh.wy;
   float dz = (float)dst.z - sh.wz;
   float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-  if (dist < ArriveRadius) {
+  // Arrival is measured from the body's *surface*, not its center —
+  // planets are up to ~1600 sysu in radius, so a center-based check
+  // would march ships straight into the globe before re-targeting.
+  if (dist < (float)dst.radius + ArriveRadius) {
     sh.destPOI = pickNonStarPOI(L, s, sh.destPOI);
     return false;
   }

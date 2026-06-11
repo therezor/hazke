@@ -702,19 +702,33 @@ inline void renderIcoSphere(M5Canvas& g,
                             float radius, Shader shader) {
   if (!icoSubReady) buildIcoSubdivided();
 
+  // Verts are accepted down to a much tighter plane than the POI cull
+  // (NearZ = 50): on a close approach the body spans verts sitting just
+  // in front of the camera, and dropping their faces punches holes in
+  // the sphere. Projected coords are clamped so a vert grazing the
+  // plane can't hand the rasterizer a megapixel triangle.
   struct V { int sx, sy; bool vis; };
   V pv[IcoSubVerts];
   const int vxc = Config::ViewX + Config::ViewW / 2;
   const int vyc = Config::ViewY + Config::ViewH / 2;
+  constexpr float BodyNearZ  = 6.0f;
+  constexpr int   CoordLimit = 3000;
   for (int i = 0; i < IcoSubVerts; i++) {
     float dpx = pcx_w + icoSubV[i][0] * radius - state.px;
     float dpy = pcy_w + icoSubV[i][1] * radius - state.py;
     float dpz = pcz_w + icoSubV[i][2] * radius - state.pz;
     float cx, cy, cz;
-    pv[i].vis = toCamera(dpx, dpy, dpz, cx, cy, cz);
+    toCamera(dpx, dpy, dpz, cx, cy, cz);
+    pv[i].vis = (cz > BodyNearZ);
     if (pv[i].vis) {
-      pv[i].sx = vxc + (int)(cx * FocalLen / cz);
-      pv[i].sy = vyc - (int)(cy * FocalLen / cz);
+      int sxv = vxc + (int)(cx * FocalLen / cz);
+      int syv = vyc - (int)(cy * FocalLen / cz);
+      if (sxv < -CoordLimit) sxv = -CoordLimit;
+      if (sxv >  CoordLimit) sxv =  CoordLimit;
+      if (syv < -CoordLimit) syv = -CoordLimit;
+      if (syv >  CoordLimit) syv =  CoordLimit;
+      pv[i].sx = sxv;
+      pv[i].sy = syv;
     }
   }
 
@@ -744,11 +758,16 @@ inline void renderIcoSphere(M5Canvas& g,
   }
 }
 
-// Planet body — Lambert shading from a fixed star-side light direction.
+// Planet body — Lambert shading lit from the actual star at the system
+// origin, so the day side always faces the sun and the terminator moves
+// correctly as the player circles the body.
 inline void renderPlanet3D(M5Canvas& g,
                            float pcx_w, float pcy_w, float pcz_w,
                            float radius, uint16_t baseColor) {
-  const float lx = 0.408f, ly = 0.408f, lz = -0.816f;
+  float lx = -pcx_w, ly = -pcy_w, lz = -pcz_w;
+  float ll = sqrtf(lx*lx + ly*ly + lz*lz);
+  if (ll > 1.0f) { lx /= ll; ly /= ll; lz /= ll; }
+  else           { lx = 0.408f; ly = 0.408f; lz = -0.816f; }
   renderIcoSphere(g, pcx_w, pcy_w, pcz_w, radius,
                   [&](float nx, float ny, float nz, float /*vd*/) {
     float ldot = nx*lx + ny*ly + nz*lz;
@@ -961,16 +980,47 @@ inline void renderWorld(M5Canvas& g) {
   // Rocks first so POI markers and labels overlay them naturally.
   renderBelt(g);
 
-  // First pass: project everything, remember cz for sorting.
-  struct Hit { int sx, sy; float cz; uint8_t i; };
+  // First pass: project everything, remember cz for sorting. Bodies with
+  // real volume (star / planets) get a cull margin that grows with their
+  // projected radius — a screen-filling sphere must not vanish the moment
+  // its *center* leaves the viewport. If the center sits beside or behind
+  // the camera but the body is close enough that its limb can still wrap
+  // into view, keep it anyway and sort by raw distance.
+  struct Hit { int sx, sy; float cz; uint8_t i; bool ctr; };
   Hit hits[SolarSystem::MaxPOIs];
   int n = 0;
+  const int vcx = Config::ViewX + Config::ViewW / 2;
+  const int vcy = Config::ViewY + Config::ViewH / 2;
   for (int i = 0; i < layout.numPOIs; i++) {
+    const auto& p = layout.poi[i];
     int sx, sy; float cz;
-    if (!projectPOI(layout.poi[i], sx, sy, cz)) continue;
+    bool centerOk = projectPOI(p, sx, sy, cz);
+    float bodyScale = (p.type == SolarSystem::POIType::Star)   ? StarVisualScale
+                    : (p.type == SolarSystem::POIType::Planet) ? PlanetVisualScale
+                    : 0.0f;
+    if (bodyScale > 0.0f) {
+      float dx = (float)p.x - state.px;
+      float dy = (float)p.y - state.py;
+      float dz = (float)p.z - state.pz;
+      float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+      float worldR = (float)p.radius * bodyScale;
+      if (!centerOk) {
+        if (dist < worldR * 1.6f + 2.0f * NearZ) {
+          hits[n++] = { vcx, vcy, dist, (uint8_t)i, false };
+        }
+        continue;
+      }
+      int margin = 40 + (int)(worldR * FocalLen / cz);
+      if (margin > 4000) margin = 4000;
+      if (sx < Config::ViewX - margin || sx > Config::ViewX + Config::ViewW + margin) continue;
+      if (sy < Config::ViewY - margin || sy > Config::ViewY + Config::ViewH + margin) continue;
+      hits[n++] = { sx, sy, cz, (uint8_t)i, true };
+      continue;
+    }
+    if (!centerOk) continue;
     if (sx < Config::ViewX - 40 || sx > Config::ViewX + Config::ViewW + 40) continue;
     if (sy < Config::ViewY - 40 || sy > Config::ViewY + Config::ViewH + 40) continue;
-    hits[n++] = { sx, sy, cz, (uint8_t)i };
+    hits[n++] = { sx, sy, cz, (uint8_t)i, true };
   }
   // Insertion sort by cz desc — n is tiny.
   for (int i = 1; i < n; i++) {
@@ -999,13 +1049,40 @@ inline void renderWorld(M5Canvas& g) {
         // path kicks in early (sr ≥ 4) so it stops looking flat as soon
         // as it's more than a pixel cluster.
         float worldR = (float)p.radius * StarVisualScale;
+        // Distance check first: the player can fly *inside* the visual
+        // sphere while still alive (the fatal heat radius sits well
+        // inside it). In there every face is a backface and the sun
+        // would vanish — instead the photosphere fills the whole view.
+        float ddx = (float)p.x - state.px;
+        float ddy = (float)p.y - state.py;
+        float ddz = (float)p.z - state.pz;
+        float dist = sqrtf(ddx*ddx + ddy*ddy + ddz*ddz);
+        if (dist < worldR + 2.0f * NearZ) {
+          g.fillRect(Config::ViewX, Config::ViewY,
+                     Config::ViewW, Config::ViewH, 0xFFFB);
+          r = 160; labelR = 160;
+          break;
+        }
         int sr = (int)(worldR * FocalLen / cz);
         if (sr < 3) sr = 3;
         if (sr > 160) sr = 160;
         if (sr < 4) {
           g.fillCircle(sx, sy, sr, col);
+          // Faint glow pixels so the distant star twinkles a little
+          // brighter than a plain dot.
+          g.drawPixel(sx - sr - 1, sy, 0x51A0);
+          g.drawPixel(sx + sr + 1, sy, 0x51A0);
+          g.drawPixel(sx, sy - sr - 1, 0x51A0);
+          g.drawPixel(sx, sy + sr + 1, 0x51A0);
         } else {
           renderStar3D(g, (float)p.x, (float)p.y, (float)p.z, worldR);
+          // Soft corona — two faint amber rings just past the limb.
+          // Skipped when (sx, sy) is the view-center fallback rather
+          // than a real projection of the star's center.
+          if (sr <= 120 && hits[k].ctr) {
+            g.drawCircle(sx, sy, sr + 2, 0x51A0);
+            g.drawCircle(sx, sy, sr + 5, 0x28C0);
+          }
         }
         r = sr; labelR = sr;
         break;
@@ -1674,6 +1751,30 @@ inline void renderNPCShips(M5Canvas& g) {
   float rxw = state.uy * state.fz - state.uz * state.fy;
   float ryw = state.uz * state.fx - state.ux * state.fz;
   float rzw = state.ux * state.fy - state.uy * state.fx;
+
+  // A ship is hidden when the camera→ship segment passes through a
+  // star/planet body — without this, silhouettes draw on top of the
+  // globe they're behind.
+  auto hiddenByBody = [&](float dpx, float dpy, float dpz,
+                          float shipDist) -> bool {
+    for (int b = 0; b < layout.numPOIs; b++) {
+      const auto& p = layout.poi[b];
+      float scale = (p.type == SolarSystem::POIType::Star)   ? StarVisualScale
+                  : (p.type == SolarSystem::POIType::Planet) ? PlanetVisualScale
+                  : 0.0f;
+      if (scale <= 0.0f) continue;
+      float ox = (float)p.x - state.px;
+      float oy = (float)p.y - state.py;
+      float oz = (float)p.z - state.pz;
+      float t = (ox * dpx + oy * dpy + oz * dpz) / shipDist;
+      if (t < 0.0f || t > shipDist) continue;   // body not between us
+      float closest2 = ox*ox + oy*oy + oz*oz - t * t;
+      float R = (float)p.radius * scale;
+      if (closest2 < R * R) return true;
+    }
+    return false;
+  };
+
   for (int i = 0; i < NPCShip::MaxNPCs; i++) {
     const auto& sh = NPCShip::ships[i];
     if (!sh.active) continue;
@@ -1683,6 +1784,8 @@ inline void renderNPCShips(M5Canvas& g) {
     float cxx, cyy, czz;
     if (!toCamera(dpx, dpy, dpz, cxx, cyy, czz)) continue;
     if (czz < 60.0f) continue;          // tighter than NearZ — avoid huge sprites
+    float shipDist = sqrtf(dpx*dpx + dpy*dpy + dpz*dpz);
+    if (shipDist > 1.0f && hiddenByBody(dpx, dpy, dpz, shipDist)) continue;
 
     // NPC's world-space forward picks up pitch + yaw so dives and climbs
     // are visible; world-space up is fixed (0,1,0). Both go through the

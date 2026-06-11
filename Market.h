@@ -126,6 +126,26 @@ inline uint8_t qtyAt(int sysIdx, int c) {
   return (uint8_t)q;
 }
 
+// R31: per-planet stock. Each planet carries a deterministic subset of
+// the system market — roughly one commodity in four simply isn't sold at
+// a given world, and the rest scale 50..150% of the system baseline.
+// This is what makes "buy it at the other planet" quests meaningful.
+inline uint8_t qtyAtPlanet(int sysIdx, int planetPOI, int c) {
+  if (planetPOI < 0) return qtyAt(sysIdx, c);
+  int q = (int)qtyAt(sysIdx, c);
+  uint32_t s = Galaxy::systemSubSeed(sysIdx,
+      0x504C41u + (uint32_t)c * 53u
+      + (uint32_t)planetPOI * 0x9E3779B9u
+      + Galaxy::marketEpoch * 0x85EBCA6Bu);
+  uint32_t r = Galaxy::lcg(s);
+  if ((r & 3u) == 0u) return 0;             // this world doesn't carry it
+  int scale = 50 + (int)((r >> 8) % 101u);  // 50..150%
+  q = q * scale / 100;
+  if (q < 0)  q = 0;
+  if (q > 99) q = 99;
+  return (uint8_t)q;
+}
+
 inline const Item& itemAt(int c) { return items[c]; }
 
 } // namespace Market

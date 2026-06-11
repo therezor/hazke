@@ -177,6 +177,41 @@ inline uint8_t pickCommodity(int sysIdx, uint32_t& seed, bool inStock) {
   return (uint8_t)Market::Food;
 }
 
+// Pick a commodity for a fetch-style quest (Delivery / Scavenge). The
+// goal is a real shopping trip: the good is NOT sold at the home planet
+// but IS stocked (≥ `need`) at some other planet in the same system.
+// Falls back gracefully — MarketScreen additionally enforces the rule at
+// runtime once the contract is active, so a fallback pick still plays
+// out correctly.
+inline uint8_t pickFetchCommodity(int sysIdx, const SolarSystem::Layout& L,
+                                  int homePOI, uint32_t& seed, uint8_t need) {
+  auto stockedElsewhere = [&](int c) -> bool {
+    for (int i = 0; i < L.numPOIs; i++) {
+      if (L.poi[i].type != SolarSystem::POIType::Planet) continue;
+      if (i == homePOI) continue;
+      if (Market::qtyAtPlanet(sysIdx, i, c) >= need) return true;
+    }
+    return false;
+  };
+  // Pass 1: legal + missing at home + sourceable at another planet.
+  for (int tries = 0; tries < 24; tries++) {
+    int c = (int)(Galaxy::lcg(seed) % (uint32_t)Market::N);
+    if (Market::items[c].illegal) continue;
+    if (Market::qtyAtPlanet(sysIdx, homePOI, c) > 0) continue;
+    if (!stockedElsewhere(c)) continue;
+    return (uint8_t)c;
+  }
+  // Pass 2: legal + sourceable at another planet.
+  for (int tries = 0; tries < 24; tries++) {
+    int c = (int)(Galaxy::lcg(seed) % (uint32_t)Market::N);
+    if (Market::items[c].illegal) continue;
+    if (!stockedElsewhere(c)) continue;
+    return (uint8_t)c;
+  }
+  // Pass 3: anything legal in the system at all.
+  return pickCommodity(sysIdx, seed, /*inStock=*/true);
+}
+
 inline void buildBoard(int sysIdx, int planetPOI, Slot board[BoardSize]) {
   uint8_t  diff   = systemDifficulty(sysIdx);
   uint32_t seed   = Galaxy::systemSubSeed(sysIdx, 0x5151u)
@@ -232,8 +267,8 @@ inline void buildBoard(int sysIdx, int planetPOI, Slot board[BoardSize]) {
       }
       case Type::Delivery:
         s.toPOI     = pickPlanetPOI(L, seed, planetPOI);
-        s.commodity = pickCommodity(sysIdx, seed, /*inStock=*/true);
         s.qty       = (uint8_t)(2 + diff);    // 2..5 t
+        s.commodity = pickFetchCommodity(sysIdx, L, planetPOI, seed, s.qty);
         base = 500 + diff * 900
               + (int)(Galaxy::lcg(seed) % 500u);
         break;
@@ -253,8 +288,8 @@ inline void buildBoard(int sysIdx, int planetPOI, Slot board[BoardSize]) {
               + (int)(Galaxy::lcg(seed) % 250u);
         break;
       case Type::Scavenge:
-        s.commodity = pickCommodity(sysIdx, seed, /*inStock=*/false);
         s.qty       = (uint8_t)(2 + diff);
+        s.commodity = pickFetchCommodity(sysIdx, L, planetPOI, seed, s.qty);
         base = 700 + diff * 900
               + (int)(Galaxy::lcg(seed) % 500u);
         break;

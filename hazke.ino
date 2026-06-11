@@ -581,7 +581,7 @@ void loop() {
         switch (LandingScreen::selected) {
           case LandingScreen::ItemMarket:
             marketReturn = GameMode::Landed;
-            MarketScreen::enter(currentSystem);
+            MarketScreen::enter(currentSystem, LandingScreen::planetPOIidx);
             mode = GameMode::Market;
             modePhase = 0.0f;
             break;
