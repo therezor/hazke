@@ -46,7 +46,7 @@ device.
 | `A`                | Fire missile at current lock |
 | `Q`                | Fire ECM burst (if installed) |
 | `Tab`              | Cycle target POI |
-| `H`                | Hail nearby NPC trader |
+| `H`                | Dock with nearby ship (trade / loot) |
 | `M`                | Open local system map |
 | `Enter`            | Confirm in menus |
 | `` ` ``             | Back / pause |

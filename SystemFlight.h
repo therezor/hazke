@@ -251,20 +251,37 @@ inline float targetDistance() {
   return sqrtf(dx*dx + dy*dy + dz*dz);
 }
 
-// Tab: pick the next non-star POI in layout order. Cycling also clears
-// any NPC lock — the marker is one thing, so the bracket in the cockpit
-// stays on a single target.
+// Tab: cycle the selection marker through every targetable object —
+// non-star POIs first, then active NPC ships — so one key walks the whole
+// list. The two state fields stay mutually exclusive (targetIdx for a POI,
+// lockedNPC for a ship) so the cockpit shows a single bracket.
+//
+// Candidates live in one virtual index space: [0, numPOIs) are POIs and
+// [numPOIs, numPOIs + MaxNPCs) are ship slots. We find the current slot,
+// then advance to the next valid one, skipping stars and dead ships.
 inline void cycleTarget() {
-  if (layout.numPOIs <= 1) return;
-  int start = state.targetIdx;
-  int i = (start + 1) % layout.numPOIs;
-  while (i != start) {
-    if (layout.poi[i].type != SolarSystem::POIType::Star) {
-      state.targetIdx  = i;
-      state.lockedNPC  = -1;
+  int total = layout.numPOIs + NPCShip::MaxNPCs;
+  if (total <= 0) return;
+
+  int cur;
+  if (state.lockedNPC >= 0)      cur = layout.numPOIs + state.lockedNPC;
+  else if (state.targetIdx >= 0) cur = state.targetIdx;
+  else                           cur = -1;
+
+  int start = (cur < 0) ? 0 : (cur + 1) % total;
+  for (int step = 0; step < total; step++) {
+    int v = (start + step) % total;
+    if (v < layout.numPOIs) {
+      if (layout.poi[v].type == SolarSystem::POIType::Star) continue;
+      state.targetIdx = v;
+      state.lockedNPC = -1;
       return;
     }
-    i = (i + 1) % layout.numPOIs;
+    int s = v - layout.numPOIs;
+    if (!NPCShip::ships[s].active) continue;
+    state.lockedNPC = s;
+    state.targetIdx = -1;
+    return;
   }
 }
 
@@ -1395,23 +1412,28 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     }
   }
 
-  if (state.targetIdx < 0 || state.targetIdx >= layout.numPOIs) return;
-  const auto& p = layout.poi[state.targetIdx];
-  char nm[20];
-  SolarSystem::displayName(state.loadedSys, p, nm, sizeof(nm));
-
   g.setTextSize(1);
-  g.setTextColor(state.warping ? TFT_CYAN : TFT_GREEN, TFT_BLACK);
-  g.setCursor(3, 3);
-  g.printf("> %s", nm);
 
-  float k = dist / 1000.0f;
-  char buf[20];
-  if (k < 10.0f) snprintf(buf, sizeof(buf), "%.1fK", k);
-  else           snprintf(buf, sizeof(buf), "%dK", (int)k);
-  g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  g.setCursor(3, 13);
-  g.print(buf);
+  // Top-left target readout — only when a POI is actually selected. The
+  // alert stack and corner status below must NOT be gated on this, or the
+  // H=DOCK / HOSTILE / WARP prompts vanish whenever no POI is targeted.
+  if (state.targetIdx >= 0 && state.targetIdx < layout.numPOIs) {
+    const auto& p = layout.poi[state.targetIdx];
+    char nm[20];
+    SolarSystem::displayName(state.loadedSys, p, nm, sizeof(nm));
+
+    g.setTextColor(state.warping ? TFT_CYAN : TFT_GREEN, TFT_BLACK);
+    g.setCursor(3, 3);
+    g.printf("> %s", nm);
+
+    float k = dist / 1000.0f;
+    char buf[20];
+    if (k < 10.0f) snprintf(buf, sizeof(buf), "%.1fK", k);
+    else           snprintf(buf, sizeof(buf), "%dK", (int)k);
+    g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    g.setCursor(3, 13);
+    g.print(buf);
+  }
 
   // Top-right corner — ECM status only. Missile count now lives in the
   // HUD bar strip under SP, so it isn't repeated here.
@@ -1477,7 +1499,7 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     // A hailable NPC is in range. Traders → trade; anything else has
     // been shield-cracked and offers free loot (Parkan-style).
     bool loot = NPCShip::ships[hi].role != NPCShip::Role::Trader;
-    const char* tag = loot ? "H=LOOT" : "H=HAIL";
+    const char* tag = loot ? "H=LOOT" : "H=DOCK";
     int w = 6 * 6;
     int x = Config::ViewX + (Config::ViewW - w) / 2;
     g.setTextColor(loot ? TFT_RED : TFT_YELLOW, TFT_BLACK);

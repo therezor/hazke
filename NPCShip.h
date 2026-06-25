@@ -25,7 +25,7 @@ constexpr int   MaxNPCs       = 4;
 // run away from a fight or close in on a wounded ship for boarding.
 constexpr float CruiseSpeed   = 420.0f;   // sysu/s
 constexpr float ArriveRadius  = 900.0f;   // sysu — pick a new dest within
-constexpr float HailRange     = 700.0f;   // sysu — player can hail within
+constexpr float HailRange     = 1000.0f;  // sysu — player can hail within
 constexpr float TurnRate      = 1.2f;     // rad/s yaw lerp
 
 // R19 pirate/patrol tuning.

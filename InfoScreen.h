@@ -19,8 +19,9 @@ inline void draw(M5Canvas& g) {
     {"W",        "Fire laser"},
     {"R / A",    "Lock / fire missile"},
     {"Q",        "ECM blast"},
+    {"TAB",      "Cycle target"},
+    {"H",        "Dock with ship"},
     {"M",        "System map"},
-    {"CTRL+SPC",  "Screenshot to SD"},
     {"ESC",      "Back / title"},
   };
   constexpr int N = sizeof(rows) / sizeof(rows[0]);
@@ -34,7 +35,7 @@ inline void draw(M5Canvas& g) {
     g.setTextColor(MenuUI::ValueColor, TFT_BLACK);
     g.setCursor(78, y);
     g.print(rows[i].v);
-    y += 12;
+    y += 10;
   }
 
   MenuUI::printCenter(g, Config::ScreenH - 11,
