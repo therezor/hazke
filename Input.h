@@ -43,8 +43,8 @@ inline void pollInput(InputState& in) {
 
 // Edge-detected input for menus and modal screens.
 //
-// "Back" is mapped to the BACKSPACE key on the Cardputer — the keycap
-// closest to a traditional ESC. Labels in the UI call it ESC.
+// "Back" is mapped to the top-left backtick key on the Cardputer — where a
+// real ESC would normally sit. Labels in the UI call it ESC.
 struct MenuInput {
   bool any;
   bool upE, downE, leftE, rightE;
@@ -76,9 +76,8 @@ inline MenuInput pollMenuInput() {
   if (M5Cardputer.Keyboard.isPressed()) {
     auto st = M5Cardputer.Keyboard.keysState();
     if (st.enter) enter = true;
-    // Either keycap acts as ESC: top-right BACKSPACE (the obvious one)
-    // and top-left backtick (where a real ESC would normally sit).
-    if (st.del)   back  = true;
+    // The top-left backtick key acts as ESC (where a real ESC would
+    // normally sit); see the '`' case in the word loop below.
     if (st.tab)   tab   = true;
     for (auto c : st.word) {
       m.any = true;

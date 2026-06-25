@@ -130,7 +130,7 @@ inline void drawFooter(M5Canvas& g, const GameState& s) {
   MenuUI::drawFooter3(g,
                       left,                       MenuUI::TitleColor,
                       nullptr,                    MenuUI::HintColor,
-                      "< SELL  > BUY  DEL BACK",  MenuUI::HintColor);
+                      "< SELL  > BUY  ESC BACK",  MenuUI::HintColor);
 }
 
 inline void draw(M5Canvas& g, int sysIdx, const GameState& s) {

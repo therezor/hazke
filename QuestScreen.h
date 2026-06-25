@@ -16,8 +16,8 @@
 //
 // One quest can be active at a time. Each planet exposes a deterministic
 // board of `Quest::BoardSize` offers. ENTER accepts (only if no active
-// quest); '0' or BACKSPACE-on-board discards the current one (with a
-// small standing penalty).
+// quest); when a quest is active ENTER opens a confirmation modal to
+// discard the current one (with a small standing penalty).
 
 namespace QuestScreen {
 
@@ -177,10 +177,10 @@ inline void draw(M5Canvas& g, const GameState& gs) {
 
   // Footer hint changes with state.
   const char* hint = confirmDiscardOpen
-                       ? "ENTER=CONFIRM  DEL=CANCEL"
+                       ? "ENTER=CONFIRM  ESC=CANCEL"
                        : (Quest::isActive()
-                            ? "ENTER=DISCARD  DEL=BACK"
-                            : "ENTER=TAKE  DEL=BACK");
+                            ? "ENTER=DISCARD  ESC=BACK"
+                            : "ENTER=TAKE  ESC=BACK");
   MenuUI::drawFooter(g, hint);
 
   MenuUI::drawToast(g, toastMsg, toast, 0.6f, 220, 220, 55);
@@ -213,7 +213,7 @@ inline void draw(M5Canvas& g, const GameState& gs) {
     g.print(sub);
 
     g.setTextColor(g.color565(255, 230, 90), bg);
-    const char* prompt = "ENTER=YES  DEL=NO";
+    const char* prompt = "ENTER=YES  ESC=NO";
     int pw = (int)strlen(prompt) * 6;
     g.setCursor(boxX + (boxW - pw) / 2, boxY + 44);
     g.print(prompt);

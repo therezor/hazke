@@ -79,7 +79,7 @@ inline void drawFooter(M5Canvas& g, int targetIdx) {
   g.setTextColor(TFT_DARKGREY, TFT_BLACK);
   g.drawFastHLine(0, Config::ScreenH - 12, Config::ScreenW, TFT_DARKGREY);
   g.setCursor(2, Config::ScreenH - 9);
-  g.print("ARROWS  ENTER=DATA  DEL=BACK");
+  g.print("ARROWS  ENTER=DATA  ESC=BACK");
   // Idx readout on the right
   char buf[16];
   snprintf(buf, sizeof(buf), "SYS %02d/%02d", targetIdx, Galaxy::NumSystems - 1);

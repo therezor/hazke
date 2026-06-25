@@ -49,7 +49,7 @@ device.
 | `H`                | Hail nearby NPC trader |
 | `M`                | Open local system map |
 | `Enter`            | Confirm in menus |
-| `Backspace` / `` ` `` | Back / pause |
+| `` ` ``             | Back / pause |
 
 ---
 

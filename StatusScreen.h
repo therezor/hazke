@@ -100,7 +100,7 @@ inline void draw(M5Canvas& g, int currentIdx, const GameState& s) {
     MenuUI::drawStatRow(g, 114, "GEAR", eq, TFT_LIGHTGREY);
   }
 
-  MenuUI::drawFooter(g, "DEL=BACK");
+  MenuUI::drawFooter(g, "ESC=BACK");
 }
 
 } // namespace StatusScreen
