@@ -1,6 +1,10 @@
 #pragma once
 
 namespace Config {
+  // Release version — update here only; the title badge and About screen
+  // both read from this so there's a single source of truth.
+  constexpr const char* VersionTag = "v1.1";
+
   constexpr int ScreenW = 240;
   constexpr int ScreenH = 135;
 

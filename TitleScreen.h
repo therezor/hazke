@@ -56,7 +56,7 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   g.setTextSize(1);
   g.setTextColor(MenuUI::HintColor, TFT_BLACK);
   g.setCursor(4, Config::ScreenH - 13);
-  g.print("v1.0");
+  g.print(Config::VersionTag);
 }
 
 } // namespace TitleScreen

@@ -1,6 +1,7 @@
 #pragma once
 #include <M5GFX.h>
 #include <string.h>
+#include <stdio.h>
 #include "Config.h"
 #include "MenuUI.h"
 
@@ -12,9 +13,12 @@ inline void draw(M5Canvas& g) {
   MenuUI::printCenter(g, 6, "ABOUT", MenuUI::TitleColor);
   g.drawFastHLine(80, 16, 80, MenuUI::SepColor);
 
+  char title[24];
+  snprintf(title, sizeof(title), "HAZKE  %s", Config::VersionTag);
+
   struct Line { uint16_t color; const char* text; };
-  static const Line lines[] = {
-    {TFT_WHITE,     "HAZKE  v1.0"},
+  const Line lines[] = {
+    {TFT_WHITE,     title},
     {TFT_LIGHTGREY, "An open-universe space sim"},
     {TFT_LIGHTGREY, "for the M5Cardputer."},
     {TFT_DARKGREY,  ""},
