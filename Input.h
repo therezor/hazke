@@ -22,6 +22,8 @@ inline void pollInput(InputState& in) {
   in = InputState{};
   if (!M5Cardputer.Keyboard.isPressed()) return;
   auto state = M5Cardputer.Keyboard.keysState();
+  // Ctrl+Space is the screenshot hotkey; don't also fire when it's held.
+  const bool ctrlHeld = state.ctrl;
   for (auto c : state.word) {
     switch (c) {
       case ';': in.pitchUp    = true; break;
@@ -33,7 +35,7 @@ inline void pollInput(InputState& in) {
       // W or SPACE fires the laser — W is the documented primary, SPACE
       // is kept for muscle-memory.
       case 'w': in.fire       = true; break;
-      case ' ': in.fire       = true; break;
+      case ' ': if (!ctrlHeld) in.fire = true; break;
       default: break;
     }
   }

@@ -3,13 +3,22 @@
 #include <string.h>
 #include "Config.h"
 #include "MenuUI.h"
+#include "Audio.h"
 
 namespace TitleScreen {
+
+enum : int {
+  ItemNewGame = 0,
+  ItemSound,
+  ItemControls,
+  ItemAbout,
+};
 
 struct MenuItem { const char* label; };
 
 inline const MenuItem items[] = {
   {"NEW GAME"},
+  {"SOUND"},      // label resolved at draw time from Audio::muted
   {"CONTROLS"},
   {"ABOUT"},
 };
@@ -33,7 +42,9 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   const int firstY = 60;
   const int itemH  = 14;
   for (int i = 0; i < N; i++) {
-    MenuUI::drawBigMenuItem(g, firstY + i * itemH, items[i].label,
+    const char* label = items[i].label;
+    if (i == ItemSound) label = Audio::muted ? "SOUND: OFF" : "SOUND: ON";
+    MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phaseSec, /*destructive=*/false,
                             MenuUI::DisabledColor, /*textSize=*/1);
   }
@@ -45,7 +56,7 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   g.setTextSize(1);
   g.setTextColor(MenuUI::HintColor, TFT_BLACK);
   g.setCursor(4, Config::ScreenH - 13);
-  g.print("v0.4");
+  g.print("v1.0");
 }
 
 } // namespace TitleScreen

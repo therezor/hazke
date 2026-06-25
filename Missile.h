@@ -252,7 +252,7 @@ inline void update(GameState& g, float dt,
           g.hull -= PlayerDamage;
         }
         if (g.hull < 0.0f) g.hull = 0.0f;
-        Audio::shieldHit();   // R28
+        Audio::playerHit();   // R28
         m.active = false;
         continue;
       }

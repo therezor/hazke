@@ -20,6 +20,7 @@ inline void draw(M5Canvas& g) {
     {"R / A",    "Lock / fire missile"},
     {"Q",        "ECM blast"},
     {"M",        "System map"},
+    {"CTRL+SPC",  "Screenshot to SD"},
     {"ESC",      "Back / title"},
   };
   constexpr int N = sizeof(rows) / sizeof(rows[0]);

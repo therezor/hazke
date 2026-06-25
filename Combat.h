@@ -91,6 +91,7 @@ inline void tick(float dt) {
 // promotion check, and the death particle burst.
 inline void registerPlayerKill(GameState& g, NPCShip::Ship& sh) {
   Particles::spawnBurst(sh.wx, sh.wy, sh.wz, 0xFD20, 40);
+  Audio::explosion();
   g.kills++;
   if (sh.role == NPCShip::Role::Pirate) {
     g.credits += BountyTenthsCR;
@@ -162,6 +163,9 @@ inline bool tryPlayerFire(GameState& g,
 
   float dmg = DamageByTier[g.laserTier];
   auto& sh = NPCShip::ships[bestI];
+  // Hit confirmation — on its own channel so it layers over the zap
+  // instead of cutting it off.
+  Audio::hitTarget();
   // Player shot this ship — it fights back from now on, regardless of
   // role. Cargo traders included.
   sh.provoked = true;
@@ -200,8 +204,8 @@ inline void damagePlayer(GameState& g, float amount) {
     g.hull -= amount;
   }
   if (g.hull < 0.0f) g.hull = 0.0f;
-  // R28: shield-hit thump — covers both laser and missile impacts.
-  Audio::shieldHit();
+  // Crunch on the hit channel — covers both laser and missile impacts.
+  Audio::playerHit();
   playerHitFlash = PlayerHitFlashTime;
 }
 
@@ -210,7 +214,7 @@ inline void damagePlayer(GameState& g, float amount) {
 inline void damagePlayerHull(GameState& g, float amount) {
   g.hull -= amount;
   if (g.hull < 0.0f) g.hull = 0.0f;
-  Audio::shieldHit();
+  Audio::playerHit();
   playerHitFlash = PlayerHitFlashTime;
 }
 

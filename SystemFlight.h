@@ -326,6 +326,7 @@ inline void triggerDeath() {
   if (state.dying) return;
   state.dying      = true;
   state.deathTimer = DeathAnimTime;
+  Audio::explosion();
 }
 
 inline void update(GameState& g, float dt) {
@@ -986,7 +987,7 @@ inline void renderWorld(M5Canvas& g) {
   // its *center* leaves the viewport. If the center sits beside or behind
   // the camera but the body is close enough that its limb can still wrap
   // into view, keep it anyway and sort by raw distance.
-  struct Hit { int sx, sy; float cz; uint8_t i; bool ctr; };
+  struct Hit { int sx, sy; float cz; uint8_t i; };
   Hit hits[SolarSystem::MaxPOIs];
   int n = 0;
   const int vcx = Config::ViewX + Config::ViewW / 2;
@@ -1006,7 +1007,7 @@ inline void renderWorld(M5Canvas& g) {
       float worldR = (float)p.radius * bodyScale;
       if (!centerOk) {
         if (dist < worldR * 1.6f + 2.0f * NearZ) {
-          hits[n++] = { vcx, vcy, dist, (uint8_t)i, false };
+          hits[n++] = { vcx, vcy, dist, (uint8_t)i };
         }
         continue;
       }
@@ -1014,13 +1015,13 @@ inline void renderWorld(M5Canvas& g) {
       if (margin > 4000) margin = 4000;
       if (sx < Config::ViewX - margin || sx > Config::ViewX + Config::ViewW + margin) continue;
       if (sy < Config::ViewY - margin || sy > Config::ViewY + Config::ViewH + margin) continue;
-      hits[n++] = { sx, sy, cz, (uint8_t)i, true };
+      hits[n++] = { sx, sy, cz, (uint8_t)i };
       continue;
     }
     if (!centerOk) continue;
     if (sx < Config::ViewX - 40 || sx > Config::ViewX + Config::ViewW + 40) continue;
     if (sy < Config::ViewY - 40 || sy > Config::ViewY + Config::ViewH + 40) continue;
-    hits[n++] = { sx, sy, cz, (uint8_t)i, true };
+    hits[n++] = { sx, sy, cz, (uint8_t)i };
   }
   // Insertion sort by cz desc — n is tiny.
   for (int i = 1; i < n; i++) {
@@ -1076,13 +1077,6 @@ inline void renderWorld(M5Canvas& g) {
           g.drawPixel(sx, sy + sr + 1, 0x51A0);
         } else {
           renderStar3D(g, (float)p.x, (float)p.y, (float)p.z, worldR);
-          // Soft corona — two faint amber rings just past the limb.
-          // Skipped when (sx, sy) is the view-center fallback rather
-          // than a real projection of the star's center.
-          if (sr <= 120 && hits[k].ctr) {
-            g.drawCircle(sx, sy, sr + 2, 0x51A0);
-            g.drawCircle(sx, sy, sr + 5, 0x28C0);
-          }
         }
         r = sr; labelR = sr;
         break;

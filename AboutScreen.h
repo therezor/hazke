@@ -14,7 +14,7 @@ inline void draw(M5Canvas& g) {
 
   struct Line { uint16_t color; const char* text; };
   static const Line lines[] = {
-    {TFT_WHITE,     "HAZKE  v0.4"},
+    {TFT_WHITE,     "HAZKE  v1.0"},
     {TFT_LIGHTGREY, "An open-universe space sim"},
     {TFT_LIGHTGREY, "for the M5Cardputer."},
     {TFT_DARKGREY,  ""},

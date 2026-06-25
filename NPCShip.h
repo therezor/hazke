@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "Galaxy.h"
 #include "SolarSystem.h"
+#include "Audio.h"
 
 // Refit R16: NPC traders in flight.
 //
@@ -63,6 +64,9 @@ struct Ship {
   uint8_t  modelId;      // R25: Ship3D::ModelId used to render this hull
   bool     provoked;     // Player has shot this ship — it now fights back
                          // even if it's a Trader or peaceful Patrol.
+  bool     alerted;      // Hostile-alert SFX already played for the
+                         // current engagement; cleared with hysteresis
+                         // when the ship breaks off.
 };
 
 inline Ship  ships[MaxNPCs];
@@ -166,6 +170,7 @@ inline void spawnFor(int sysIdx, const SolarSystem::Layout& L) {
     }
     sh.attacking = false;
     sh.provoked  = false;
+    sh.alerted   = false;
     sh.shields   = 1.0f;
     sh.hull      = 1.0f;
     sh.fireTimer = 0.5f + (float)i * 0.3f;   // stagger pirate first shots
@@ -268,6 +273,7 @@ inline void ensurePirates(int want, int sysIdx,
     sh.homeFaction = 2;               // Cartel
     sh.provoked    = false;
     sh.attacking   = false;
+    sh.alerted     = false;
   };
 
   // First pass: promote existing non-pirate ships.
@@ -419,6 +425,12 @@ inline void update(const SolarSystem::Layout& L, float dt,
       float dz = playerZ - sh.wz;
       float dist = sqrtf(dx*dx + dy*dy + dz*dz);
       if (dist < DetectRange) {
+        // First tick of this engagement — warn the player audibly that
+        // someone just turned hostile and is coming in.
+        if (!sh.alerted) {
+          sh.alerted = true;
+          Audio::hostileAlert();
+        }
         float horiz = sqrtf(dx*dx + dz*dz);
         float targetYaw   = atan2f(dx, dz);
         float targetPitch = atan2f(dy, horiz);
@@ -473,6 +485,10 @@ inline void update(const SolarSystem::Layout& L, float dt,
         continue;
       }
       sh.attacking = false;
+      // Re-arm the alert only once the ship has clearly broken off, so
+      // a hostile drifting across the detect boundary doesn't whoop on
+      // every crossing.
+      if (dist > DetectRange * 1.5f) sh.alerted = false;
     } else {
       sh.attacking = false;
     }

@@ -17,6 +17,7 @@ namespace PauseMenu {
 enum : int {
   ItemResume = 0,
   ItemMap,
+  ItemSound,
   ItemControls,
   ItemExit,
 };
@@ -24,6 +25,7 @@ enum : int {
 inline const char* items[] = {
   "RESUME",
   "MAP",
+  "SOUND",        // label resolved at draw time from Audio::muted
   "CONTROLS",
   "EXIT TO MENU",
 };
@@ -71,9 +73,11 @@ inline void draw(M5Canvas& g, float phase) {
   // itemH=16 matches the textSize-2 default glyph height in
   // drawBigMenuItem; tighter pitches would overlap.
   const int itemH  = 16;
-  const int firstY = 40;
+  const int firstY = 36;
   for (int i = 0; i < N; i++) {
-    MenuUI::drawBigMenuItem(g, firstY + i * itemH, items[i],
+    const char* label = items[i];
+    if (i == ItemSound) label = Audio::muted ? "SOUND: OFF" : "SOUND: ON";
+    MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phase);
   }
 

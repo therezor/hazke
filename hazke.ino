@@ -12,6 +12,7 @@
 //   R / A                       lock / fire missile
 //   Q                           ECM blast
 //   M                           local system map (chart opens at the gate)
+//   CTRL+SPACE                   save a screenshot to the SD card
 //   ENTER                       confirm / select (menu)
 //   `                           back / title
 //
@@ -50,6 +51,7 @@
 #include "Quest.h"
 #include "QuestScreen.h"
 #include "Audio.h"
+#include "Screenshot.h"
 
 static M5Canvas canvas(&M5Cardputer.Display);
 static GameState game;
@@ -138,18 +140,24 @@ static void newCommander() {
 
 static void selectMenuItem() {
   switch (menuSelected) {
-    case 0: // NEW GAME — fresh in-RAM commander, drop into flight.
+    case TitleScreen::ItemNewGame: // fresh in-RAM commander, drop into flight.
       newCommander();
       SystemFlight::enter(currentSystem, SystemFlight::SpawnAt::AtGate);
       mode = GameMode::SystemFlight;
       modePhase = 0.0f;
       break;
-    case 1: // CONTROLS
+    case TitleScreen::ItemSound:
+      // Toggle stays on the title screen; the accept chime doubles as
+      // an audible "sound is now on" confirmation.
+      Audio::toggleMute();
+      if (!Audio::muted) Audio::missionAccept();
+      break;
+    case TitleScreen::ItemControls:
       infoReturn = GameMode::Title;
       mode = GameMode::Info;
       modePhase = 0.0f;
       break;
-    case 2: // ABOUT
+    case TitleScreen::ItemAbout:
       mode = GameMode::About;
       modePhase = 0.0f;
       break;
@@ -167,6 +175,18 @@ void loop() {
   modePhase += dt;
 
   MenuInput mk = pollMenuInput();
+
+  // Global screenshot hotkey: Ctrl+Space writes the current frame to SD.
+  // Edge-detected so a held combo snaps exactly one shot.
+  static bool prevShotKey = false;
+  bool shotKey = false;
+  if (M5Cardputer.Keyboard.isPressed()) {
+    auto ks = M5Cardputer.Keyboard.keysState();
+    shotKey = ks.ctrl && ks.space;
+  }
+  bool shotEdge = shotKey && !prevShotKey;
+  prevShotKey = shotKey;
+  Screenshot::tick(dt);
 
   switch (mode) {
     case GameMode::Title: {
@@ -413,6 +433,12 @@ void loop() {
             MapScreen::enter(currentSystem);
             mode = GameMode::Map;
             modePhase = 0.0f;
+            break;
+          case PauseMenu::ItemSound:
+            // Toggle stays in the pause menu; the accept chime doubles
+            // as an audible "sound is now on" confirmation.
+            Audio::toggleMute();
+            if (!Audio::muted) Audio::missionAccept();
             break;
           case PauseMenu::ItemControls:
             infoReturn = GameMode::Pause;
@@ -669,6 +695,11 @@ void loop() {
       break;
     }
   }
+
+  // Screenshot: snap the finished frame, then overlay the toast so the
+  // confirmation banner is never baked into the saved image.
+  if (shotEdge) Screenshot::capture(canvas);
+  Screenshot::drawToast(canvas);
 
   canvas.pushSprite(0, 0);
 
