@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HAZKE — Open-Universe Space Sim Game for the M5 Cardputer</title>
+  <meta name="description" content="Hazke is an open-universe space-sim game that runs entirely on the M5Stack Cardputer — a 240x135 ESP32 handheld. Trade, hunt and survive across sixteen procedurally-built star systems.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%B8%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<canvas id="space" aria-hidden="true"></canvas>
+<div class="veil" aria-hidden="true"></div>
+
+<main class="page">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">Open-universe space-sim game</p>
+        <h1 class="wordmark">HA<span class="x">Z</span>KE</h1>
+        <p class="tag"><b>Trade.</b> Hunt. <b>Survive.</b></p>
+        <p class="hw-line"><span class="hw-pill">▣ A game for the M5Stack Cardputer</span> the pocket-size ESP32 handheld with a built-in keyboard.</p>
+        <p class="hero-copy">A whole space-trading game that runs entirely on a <strong>240×135 screen</strong> — sixteen procedurally-built star systems, shaded polygon flight, a living economy and pirates that mean it. No phone, no cloud, no second device. Just the Cardputer in your hand and the void.</p>
+        <div class="cta-row">
+          <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.0.0/hazke.ino.merged.bin" download><span class="k">▸</span> Download Firmware</a>
+          <a class="btn" href="https://github.com/therezor/hazke" target="_blank" rel="noopener"><span class="k">◇</span> Source on GitHub</a>
+          <span class="btn btn--label"><span class="k">▣</span> Available on Launcher</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SPEC STRIP -->
+  <section class="specs">
+    <div class="wrap">
+      <div class="spec"><div class="n">240<i>×</i>135</div><div class="l">Pixel display</div></div>
+      <div class="spec"><div class="n">ESP32<i>-</i>S3</div><div class="l">On the metal</div></div>
+      <div class="spec"><div class="n">60<i> </i>FPS</div><div class="l">Polygon flight</div></div>
+      <div class="spec"><div class="n">8<i>-</i>bit</div><div class="l">PWM audio</div></div>
+      <div class="spec"><div class="n">100<i>%</i></div><div class="l">Runs offline</div></div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="block-head">
+        <p class="eyebrow">What's in the cockpit</p>
+        <h2>A full space sim, on a device that fits your palm.</h2>
+        <p class="lead">Every system below is grown from a single seed — the same galaxy, the same prices, the same pirates, every boot. Original code, original universe.</p>
+      </div>
+
+      <div class="features">
+        <article class="feat">
+          <div class="fi">Exploration</div>
+          <h3>A Living Galaxy</h3>
+          <p>Sixteen star systems wired together by jump gates — each with its own economy, government, tech level and population. Fly into a gate to open the chart and pick your next destination.</p>
+        </article>
+        <article class="feat">
+          <div class="fi">Flight</div>
+          <h3>Free-Flight Cockpit</h3>
+          <p>Real 3D space with coordinated banking turns. Shaded polygon planets, ringed worlds, asteroid belts and a sun hot enough to cook your hull — all rendered live on the handheld.</p>
+        </article>
+        <article class="feat">
+          <div class="fi">Economy</div>
+          <h3>Make Your Fortune</h3>
+          <p>Seventeen commodities priced by supply, local law and your reputation. Buy low under one government, run narcotics past another, sell high one gate over.</p>
+        </article>
+        <article class="feat">
+          <div class="fi">Combat</div>
+          <h3>Pick a Fight</h3>
+          <p>Pulse, beam and military lasers. Up to four homing missiles with target lock, regenerating shields, and an ECM blast that scatters incoming fire before it lands.</p>
+        </article>
+        <article class="feat">
+          <div class="fi">Missions</div>
+          <h3>Take Contracts</h3>
+          <p>Patrol, delivery, courier, recon and scavenge jobs off every planet's board — scaled in danger and pay by how far from home they send you.</p>
+        </article>
+        <article class="feat">
+          <div class="fi">Progression</div>
+          <h3>Earn Your Rank</h3>
+          <p>Four factions track every kill and trade. Climb seven combat ranks from Harmless to Deadly — and sour the wrong faction, and its patrols start hunting you on sight.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONTROLS -->
+  <section class="block" id="controls">
+    <div class="wrap">
+      <div class="block-head">
+        <p class="eyebrow">Flight manual</p>
+        <h2>You fly it with the keyboard. Here's the whole stick.</h2>
+      </div>
+
+      <div class="ctl-grid">
+        <div class="panel keytable" aria-label="Control bindings">
+          <div class="keyrow"><span class="kc"><kbd>↑</kbd><kbd>↓</kbd></span><span class="ka">Pitch nose up / down</span></div>
+          <div class="keyrow"><span class="kc"><kbd>←</kbd><kbd>→</kbd></span><span class="ka">Roll / bank</span></div>
+          <div class="keyrow"><span class="kc"><kbd>E</kbd><kbd>S</kbd></span><span class="ka">Accelerate / brake</span></div>
+          <div class="keyrow"><span class="kc"><kbd>W</kbd></span><span class="ka">Fire laser</span></div>
+          <div class="keyrow"><span class="kc"><kbd>R</kbd><kbd>A</kbd></span><span class="ka">Lock target / fire missile</span></div>
+          <div class="keyrow"><span class="kc"><kbd>Q</kbd></span><span class="ka">ECM blast</span></div>
+          <div class="keyrow"><span class="kc"><kbd>TAB</kbd></span><span class="ka">Cycle target marker</span></div>
+          <div class="keyrow"><span class="kc"><kbd>M</kbd></span><span class="ka">Local system map</span></div>
+          <div class="keyrow"><span class="kc"><kbd>ENTER</kbd></span><span class="ka">Confirm / select</span></div>
+          <div class="keyrow"><span class="kc"><kbd>`</kbd><kbd>ESC</kbd></span><span class="ka">Back / pause / title</span></div>
+        </div>
+
+        <div class="ctl-notes">
+          <h3>Docking is a touch.</h3>
+          <p>There's no docking mini-game. Drift up against any planet and you <span class="hot">land automatically</span> — opening its market, equipment shop, mission board and status screen.</p>
+          <h3>Gates are the only way out.</h3>
+          <p>Fly physically into a system's <span class="hot">jump gate</span> and the galaxy chart opens. Pick a neighbouring system, confirm, and ride witchspace across — jumps cost credits by distance.</p>
+          <h3>The sun bites.</h3>
+          <p>Stray too deep into a star's corona and the <span class="hot">HEAT</span> warning climbs. Push past it and your hull cooks — fly into the photosphere and you're gone instantly.</p>
+          <h3>Hail before you holster.</h3>
+          <p>Traders are always open for business. Pirates and patrols only talk once you've shot their <span class="hot">hull below 25%</span> — your call whether that's mercy or salvage.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREENSHOTS -->
+  <section class="block" id="screens">
+    <div class="wrap">
+      <div class="block-head">
+        <p class="eyebrow">On the actual hardware</p>
+        <h2>240 by 135 pixels. Every screen drawn live in code.</h2>
+        <p class="lead">No pre-baked art or sprites — every frame is rendered on the Cardputer itself. These are real captures, pulled straight off the device with the in-game <kbd>Ctrl</kbd>+<kbd>Space</kbd> screenshot key.</p>
+      </div>
+
+      <div class="device-stage">
+        <figure class="cardputer">
+          <div class="cp-screen">
+            <img class="shot-img" src="screenshots/free-flight.bmp" alt="Hazke cockpit — free flight">
+          </div>
+          <figcaption class="cp-label">M5Stack Cardputer · ESP32-S3</figcaption>
+        </figure>
+      </div>
+
+      <div class="shot-grid">
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/galactic-chart.bmp" alt="Galactic chart screen">
+          <figcaption class="shot-cap"><span class="num">01</span>Galactic chart</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/star-gate.bmp" alt="Jump gate in flight">
+          <figcaption class="shot-cap"><span class="num">02</span>Jump gate</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/planet.bmp" alt="Approaching a planet">
+          <figcaption class="shot-cap"><span class="num">03</span>Planetfall</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/planet-menu.bmp" alt="Planet landing menu">
+          <figcaption class="shot-cap"><span class="num">04</span>Planet landing</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/market.bmp" alt="Trade market screen">
+          <figcaption class="shot-cap"><span class="num">05</span>Trade market</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/quests.bmp" alt="Mission board screen">
+          <figcaption class="shot-cap"><span class="num">06</span>Mission board</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/trader-ship.bmp" alt="Hailing a trader ship">
+          <figcaption class="shot-cap"><span class="num">07</span>Traders</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/dogfight.bmp" alt="Dogfight screen">
+          <figcaption class="shot-cap"><span class="num">08</span>Dogfight</figcaption>
+        </figure>
+        <figure class="shot-cell">
+          <img class="shot-img" src="screenshots/title-screen.bmp" alt="Title screen">
+          <figcaption class="shot-cap"><span class="num">09</span>Title screen</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- GET STARTED -->
+  <section class="block" id="get">
+    <div class="wrap">
+      <div class="block-head">
+        <p class="eyebrow">Lift off</p>
+        <h2>What you need to get flying.</h2>
+        <p class="lead">Hazke targets one specific handheld. If you have a Cardputer, you're three steps from the gate.</p>
+      </div>
+
+      <div class="start-grid">
+        <div class="panel reqs">
+          <h3>Requirements</h3>
+          <ul>
+            <li><span class="dot">▸</span><span><b>M5Stack Cardputer</b> — ESP32-S3 with a built-in keyboard and a 1.14″ ST7789 screen.</span></li>
+            <li><span class="dot">▸</span><span><b>A USB-C cable</b> to flash it from your computer.</span></li>
+            <li><span class="dot">▸</span><span><b>A launcher or Arduino IDE</b> — load the prebuilt firmware, or open <code>hazke.ino</code> and upload.</span></li>
+            <li><span class="dot">▸</span><span><b>Nothing online.</b> The whole universe lives on the chip; every run starts a fresh commander.</span></li>
+          </ul>
+        </div>
+
+        <div class="steps">
+          <h3 class="steps-title">Install in three</h3>
+          <ol>
+            <li><b>Get the firmware</b>Grab Hazke from your launcher's app catalog, or build <code>hazke.ino</code> in the Arduino IDE with the board set to M5Cardputer.</li>
+            <li><b>Flash over USB-C</b>Connect the Cardputer and upload. It boots straight to the title screen.</li>
+            <li><b>NEW GAME</b>Arrow to NEW GAME, press ENTER, and you'll wake at the jump gate of System 00 — the safe starter system. Go make some credits.</li>
+          </ol>
+          <div class="start-cta">
+            <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.0.0/hazke.ino.merged.bin" download><span class="k">▸</span> Download</a>
+            <a class="btn" href="https://github.com/therezor/hazke" target="_blank" rel="noopener"><span class="k">◇</span> Build from Source</a>
+            <span class="btn btn--label"><span class="k">▣</span> Available on Launcher</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-mark">HAZKE<span>VERSION 1.0 · CARDPUTER EDITION</span></div>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="https://github.com/therezor/hazke/releases/download/v1.0.0/hazke.ino.merged.bin" download>Download</a>
+          <a href="https://github.com/therezor/hazke" target="_blank" rel="noopener">GitHub</a>
+          <a href="#features">Features</a>
+          <a href="#screens">Screens</a>
+          <a href="#controls">Controls</a>
+          <a href="#get">Get Started</a>
+        </nav>
+      </div>
+      <p class="colophon">An independent space-sim game for the M5Cardputer, inspired by Elite, Parkan: Imperial Chronicles and Galaxy on Fire 2. All code and the entire universe are original. Built on the metal in C++.</p>
+    </div>
+  </footer>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
