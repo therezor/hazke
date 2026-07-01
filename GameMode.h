@@ -17,4 +17,6 @@ enum class GameMode {
   Status,
   Quests,        // R30: per-planet quest board (single active quest)
   GameOver,      // ship destroyed — shows stats + restart prompt
+  SaveMenu,      // save-slot picker (load from title / save from landing)
+  NameEntry,     // NEW GAME commander name typing screen
 };

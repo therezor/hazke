@@ -11,11 +11,12 @@ struct GameState {
   // Smoothed input axes -1..1
   float pitchInput;
   float rollInput;
+  float yawInput;
 
   // Angular rates (rad/sec) — used by the starfield to simulate flight
   float pitchRate;
   float rollRate;
-  float yawRate;   // reserved (no yaw key yet)
+  float yawRate;   // Z / X keys — flat nose-left/right turn
 
   // HUD readouts (0..1)
   float shield;
@@ -96,7 +97,7 @@ struct GameState {
 
   void reset() {
     speed = 0.0f;
-    pitchInput = rollInput = 0.0f;
+    pitchInput = rollInput = yawInput = 0.0f;
     pitchRate = rollRate = yawRate = 0.0f;
     shield = 1.0f;
     hull = 1.0f;
@@ -135,8 +136,10 @@ struct GameState {
     };
     axis(pitchInput, in.pitchUp,   in.pitchDown);
     axis(rollInput,  in.rollRight, in.rollLeft);
+    axis(yawInput,   in.yawRight,  in.yawLeft);
 
     pitchRate = pitchInput * 1.5f;
     rollRate  = rollInput  * 2.4f;
+    yawRate   = yawInput   * 1.1f;   // deliberately the slowest axis
   }
 };

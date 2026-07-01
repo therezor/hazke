@@ -18,9 +18,9 @@
 // Refit R11: in-system free flight.
 //
 // Player has a position and heading in system units (sysu). Throttle moves
-// forward in the heading direction; pitch input pitches the heading
-// vertically; roll input yaws the heading horizontally (arcade flight feel,
-// no separate roll axis affecting the camera).
+// forward in the heading direction; pitch input pitches the nose in the
+// ship frame; roll banks the ship around the heading; yaw (L / ') turns
+// the nose flat left/right — the slow fine-aim axis.
 //
 // Each frame we:
 //   1. integrate input → orientation → position
@@ -403,8 +403,10 @@ inline void update(GameState& g, float dt) {
   }
 
   // Local-axis rotation. pitchRate rotates forward+up around the right
-  // axis (nose up/down in ship frame); rollRate rotates up around forward
-  // (bank). Combined banking + pitching produces a coordinated turn.
+  // axis (nose up/down in ship frame); yawRate rotates forward around up
+  // (flat turn); rollRate rotates up around forward (bank). Combined
+  // banking + pitching produces a coordinated turn; yaw is the fine-aim
+  // axis on top.
   {
     // Pitch: rotate forward and up around right by ap.
     float ap = g.pitchRate * dt * 0.9f;
@@ -417,6 +419,18 @@ inline void update(GameState& g, float dt) {
     float nuz = -state.fz * sp + state.uz * cp;
     state.fx = nfx; state.fy = nfy; state.fz = nfz;
     state.ux = nux; state.uy = nuy; state.uz = nuz;
+  }
+  {
+    // Yaw: rotate forward around up by ay, toward right = up × fwd.
+    // Up is unchanged — a flat nose-left/right turn in the ship frame.
+    float ay = g.yawRate * dt * 0.9f;
+    float cy = cosf(ay), sy = sinf(ay);
+    float rx = state.uy * state.fz - state.uz * state.fy;
+    float ry = state.uz * state.fx - state.ux * state.fz;
+    float rz = state.ux * state.fy - state.uy * state.fx;
+    state.fx = state.fx * cy + rx * sy;
+    state.fy = state.fy * cy + ry * sy;
+    state.fz = state.fz * cy + rz * sy;
   }
   {
     // Roll: rotate up around forward by ar. right = up × fwd.

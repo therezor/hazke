@@ -1,9 +1,16 @@
 #pragma once
+#include <stdint.h>
 
 namespace Config {
   // Release version — update here only; the title badge and About screen
   // both read from this so there's a single source of truth.
-  constexpr const char* VersionTag = "v1.1";
+  constexpr const char* VersionTag = "v1.2";
+
+  // On-disk save format version. Bump ONLY when the save payload layout
+  // changes, together with a new frozen SaveDataVn struct and an
+  // upgradeVn-1toVn transformer in SaveFormat.h — never edit a released
+  // payload struct in place.
+  constexpr uint16_t SaveFormatVersion = 1;
 
   constexpr int ScreenW = 240;
   constexpr int ScreenH = 135;

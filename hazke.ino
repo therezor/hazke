@@ -7,6 +7,7 @@
 // Controls (shown on the Controls screen):
 //   ; / .  (UP / DOWN arrow)    pitch up / down
 //   , / /  (LEFT / RIGHT arrow) roll left / right
+//   L / '                       yaw left / right
 //   E / S                       accelerate / brake
 //   W                           fire laser
 //   R / A                       lock / fire missile
@@ -51,7 +52,12 @@
 #include "Quest.h"
 #include "QuestScreen.h"
 #include "Audio.h"
+#include "SDCard.h"
 #include "Screenshot.h"
+#include "SaveFormat.h"
+#include "SaveStore.h"
+#include "SaveMenuScreen.h"
+#include "NameEntryScreen.h"
 
 static M5Canvas canvas(&M5Cardputer.Display);
 static GameState game;
@@ -65,6 +71,7 @@ static GameMode chartReturn = GameMode::Title;
 static GameMode marketReturn = GameMode::Title;
 static GameMode questsReturn = GameMode::Title;
 static GameMode mapReturn    = GameMode::Pause;
+static GameMode saveMenuReturn = GameMode::Title;
 static float modePhase = 0.0f;
 static int   menuSelected = 0;
 
@@ -119,14 +126,14 @@ void setup() {
   Serial.println(F("================"));
   SolarSystem::dumpToSerial(0);
 
-  // Save/load deliberately omitted — the game always starts fresh until
-  // the late-stage file/SD-card save lands (post-R30 stretch).
+  // Save/load lives in SaveStore.h (LittleFS + SD slots). Both backends
+  // mount lazily on the first LOAD/SAVE menu open, so boot pays nothing.
 
   lastFrameMicros = micros();
 }
 
 static void newCommander() {
-  // In-RAM reset only; no persistence to wipe until file/SD save lands.
+  // In-RAM reset only — save slots are files and stay untouched.
   game.reset();
   currentSystem = 0;
   targetSystem  = 0;
@@ -140,10 +147,16 @@ static void newCommander() {
 
 static void selectMenuItem() {
   switch (menuSelected) {
-    case TitleScreen::ItemNewGame: // fresh in-RAM commander, drop into flight.
-      newCommander();
-      SystemFlight::enter(currentSystem, SystemFlight::SpawnAt::AtGate);
-      mode = GameMode::SystemFlight;
+    case TitleScreen::ItemNewGame: // name the commander first, then fly.
+      NameEntryScreen::enter();
+      mode = GameMode::NameEntry;
+      modePhase = 0.0f;
+      break;
+    case TitleScreen::ItemLoadGame:
+      SaveMenuScreen::enter(SaveMenuScreen::Context::Load, nullptr,
+                            currentSystem, targetSystem, -1);
+      saveMenuReturn = GameMode::Title;
+      mode = GameMode::SaveMenu;
       modePhase = 0.0f;
       break;
     case TitleScreen::ItemSound:
@@ -498,8 +511,10 @@ void loop() {
           game.speed      = 0.0f;
           game.pitchInput = 0.0f;
           game.rollInput  = 0.0f;
+          game.yawInput   = 0.0f;
           game.pitchRate  = 0.0f;
           game.rollRate   = 0.0f;
+          game.yawRate    = 0.0f;
         }
         mode = chartReturn;
         modePhase = 0.0f;
@@ -625,6 +640,16 @@ void loop() {
             mode = GameMode::Status;
             modePhase = 0.0f;
             break;
+          case LandingScreen::ItemSave:
+            // Snapshot the commander as they are right now, docked at
+            // this planet — the picker only chooses where it lands.
+            SaveMenuScreen::enter(SaveMenuScreen::Context::Save, &game,
+                                  currentSystem, targetSystem,
+                                  LandingScreen::planetPOIidx);
+            saveMenuReturn = GameMode::Landed;
+            mode = GameMode::SaveMenu;
+            modePhase = 0.0f;
+            break;
           case LandingScreen::ItemLaunch:
             launchNow = true;
             break;
@@ -659,14 +684,66 @@ void loop() {
         game.speed      = 0.0f;
         game.pitchInput = 0.0f;
         game.rollInput  = 0.0f;
+        game.yawInput   = 0.0f;
         game.pitchRate  = 0.0f;
         game.rollRate   = 0.0f;
+        game.yawRate    = 0.0f;
         mode = GameMode::SystemFlight;
         modePhase = 0.0f;
         break;
       }
 
       LandingScreen::draw(canvas, game, modePhase);
+      break;
+    }
+
+    case GameMode::NameEntry: {
+      NameEntryScreen::handleTyping();
+      if (mk.backE) {
+        mode = GameMode::Title;
+        modePhase = 0.0f;
+        break;
+      }
+      if (mk.enterE) {
+        // Reset FIRST (it stamps the JAMESON default), then overlay the
+        // typed name if the player entered one.
+        newCommander();
+        NameEntryScreen::applyTo(game);
+        SystemFlight::enter(currentSystem, SystemFlight::SpawnAt::AtGate);
+        mode = GameMode::SystemFlight;
+        modePhase = 0.0f;
+        break;
+      }
+      NameEntryScreen::draw(canvas, modePhase);
+      break;
+    }
+
+    case GameMode::SaveMenu: {
+      SaveMenuScreen::tick(dt);
+      int landedPOI = -1;
+      auto r = SaveMenuScreen::handleInput(mk, game, currentSystem,
+                                           targetSystem, landedPOI);
+      if (r == SaveMenuScreen::Result::Back) {
+        mode = saveMenuReturn;
+        modePhase = 0.0f;
+        break;
+      }
+      if (r == SaveMenuScreen::Result::Loaded) {
+        // apply() already restored the commander, quest state, market
+        // epoch and validated the docked planet. Finish the transition:
+        // invalidate the caches that key off the old commander/system,
+        // then come up docked exactly where the save was made. The first
+        // LAUNCH reuses the normal spawn/standoff/pirate-spawn path.
+        MarketScreen::localSys = -1;
+        Rank::resetToast();
+        SystemFlight::state.initialized = false;
+        Quest::clearCompletion();
+        LandingScreen::enter(currentSystem, landedPOI);
+        mode = GameMode::Landed;
+        modePhase = 0.0f;
+        break;
+      }
+      SaveMenuScreen::draw(canvas, modePhase);
       break;
     }
 

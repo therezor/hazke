@@ -27,8 +27,23 @@ commodity table, ship silhouettes and faction roster are all original.
    Cardputer enumerates as.
 4. Upload. The first boot drops you on the title screen.
 
-There is **no save system** — every reboot starts a fresh commander.
-File / SD-card persistence is on the roadmap but not yet shipped.
+## Saving
+
+The game has 5 save slots on each of two storage backends: **internal
+flash** (LittleFS on the stock `spiffs` partition, formatted on first
+use) and the **microSD card**. Saving happens while landed on a planet
+(`SAVE GAME` on the landing menu); loading (`LOAD GAME` on the title
+screen) puts you back docked at that planet. In the slot picker,
+LEFT/RIGHT switches the storage backend and `ENTER` on a slot offers
+LOAD/SAVE, COPY (backup/restore the slot to the other backend), and
+DELETE.
+
+Save files (`/hazke/saves/slotN.sav`, ~100 bytes) carry a format
+version and a CRC. When a future release changes the format, old files
+are upgraded automatically at load time through chained transformers in
+`SaveFormat.h` — a save from any older version keeps working. Files
+written by a *newer* firmware show as `NEWER VERSION` and are left
+untouched.
 
 ## Controls
 
@@ -39,6 +54,7 @@ device.
 |--------------------|--------|
 | `;` / `.` (↑ / ↓)  | Pitch up / down |
 | `,` / `/` (← / →)  | Roll left / right |
+| `L` / `'`          | Yaw left / right |
 | `E`                | Accelerate |
 | `S`                | Brake |
 | `W` or `Space`     | Fire laser |
@@ -243,6 +259,9 @@ Combat.h            laser + missile damage resolution
 Missile.h           homing missile motion + ECM
 Particles.h         tiny pixel explosion / debris system
 Audio.h             PWM SFX wrappers
+SDCard.h            shared lazy microSD bring-up (screenshots + saves)
+SaveFormat.h        versioned save payloads + CRC + upgrade transformers
+SaveStore.h         save-slot IO on LittleFS/SD + game<->payload marshalling
 Ship3D.h            wireframe ship renderer (6 hull silhouettes)
 Starfield.h         parallax stars
 Cockpit.h           HUD overlay (bars, banners, rank toast)
@@ -263,6 +282,7 @@ QuestScreen.h       planet quest board
 PauseMenu.h         in-flight pause overlay (shows active quest step)
 WitchspaceScreen.h  hyperspace transit cinematic
 GameOverScreen.h    death + restart prompt
+SaveMenuScreen.h    save/load slot picker (backend tabs, copy, delete)
 MenuUI.h            shared menu chrome (headers, footers, toasts)
 ```
 
@@ -272,8 +292,8 @@ MenuUI.h            shared menu chrome (headers, footers, toasts)
   POIs per system, ≤ 4 active NPCs).
 - 240×135 @ 16 bpp via an `M5Canvas` double-buffer. Target ~30 FPS in
   flight; menus may drop to 15.
-- All game state is in-RAM. Persistence (file/SD save) is the only
-  major feature still on the roadmap.
+- Game state lives in RAM during play; landed-only saves keep the save
+  format tiny (~100 B) and free of transient flight state.
 
 ## License
 

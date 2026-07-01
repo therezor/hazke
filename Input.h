@@ -13,6 +13,8 @@ struct InputState {
   bool pitchDown;
   bool rollLeft;
   bool rollRight;
+  bool yawLeft;
+  bool yawRight;
   bool accel;
   bool decel;
   bool fire;
@@ -30,6 +32,10 @@ inline void pollInput(InputState& in) {
       case '.': in.pitchDown  = true; break;
       case ',': in.rollLeft   = true; break;
       case '/': in.rollRight  = true; break;
+      // L and ' sit immediately left/right of the ; (up-arrow) key, so
+      // yaw lives on the same hand as pitch/roll.
+      case 'l':  in.yawLeft   = true; break;
+      case '\'': in.yawRight  = true; break;
       case 'e': in.accel      = true; break;
       case 's': in.decel      = true; break;
       // W or SPACE fires the laser — W is the documented primary, SPACE
@@ -52,7 +58,6 @@ struct MenuInput {
   bool chartE;
   bool toggleE;   // 'f' — short/long range chart toggle (re-usable)
   bool tabE;      // R12: cycle selected POI in SystemFlight
-  bool landE;     // R13: land on a nearby planet ('l')
   bool hailE;     // R16: hail a nearby NPC trader ('h')
   bool lockE;     // R21: cycle missile lock onto next NPC in front ('r')
   bool missileE;  // R21: fire a missile at the current lock ('a')
@@ -62,7 +67,7 @@ struct MenuInput {
 
 namespace MenuInputInternal {
   inline bool prevUp, prevDown, prevLeft, prevRight;
-  inline bool prevEnter, prevBack, prevChart, prevToggle, prevTab, prevLand, prevHail;
+  inline bool prevEnter, prevBack, prevChart, prevToggle, prevTab, prevHail;
   inline bool prevLock, prevMissile, prevEcm, prevMap;
 }
 
@@ -70,7 +75,7 @@ inline MenuInput pollMenuInput() {
   using namespace MenuInputInternal;
   MenuInput m{};
   bool up=false, down=false, left=false, right=false;
-  bool enter=false, back=false, chart=false, toggle=false, tab=false, land=false, hail=false;
+  bool enter=false, back=false, chart=false, toggle=false, tab=false, hail=false;
   bool lock=false, missile=false, ecm=false, map=false;
 
   if (M5Cardputer.Keyboard.isPressed()) {
@@ -89,7 +94,8 @@ inline MenuInput pollMenuInput() {
         case '`': back  = true; break;
         case 'f': toggle = true; break;
         case '\t': tab  = true; break;   // belt-and-braces in case ASCII path fires
-        case 'l': land = true; break;
+        // 'l' is deliberately unmapped here: landing is automatic on
+        // proximity (the old R13 land key is gone) and L is now flight yaw.
         case 'h': hail = true; break;
         // 'r' cycles missile lock; 'a' fires; 'm' opens the local map.
         case 'r': lock    = true; break;
@@ -110,7 +116,6 @@ inline MenuInput pollMenuInput() {
   m.chartE  = chart && !prevChart;
   m.toggleE = toggle && !prevToggle;
   m.tabE    = tab    && !prevTab;
-  m.landE   = land   && !prevLand;
   m.hailE   = hail   && !prevHail;
   m.lockE    = lock    && !prevLock;
   m.missileE = missile && !prevMissile;
@@ -121,7 +126,7 @@ inline MenuInput pollMenuInput() {
   prevLeft = left; prevRight = right;
   prevEnter = enter; prevBack = back; prevChart = chart;
   prevToggle = toggle; prevTab = tab;
-  prevLand = land;   prevHail = hail;
+  prevHail = hail;
   prevLock = lock; prevMissile = missile; prevEcm = ecm;
   prevMap = map;
   return m;

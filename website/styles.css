@@ -248,6 +248,18 @@ footer{border-top:1px solid var(--rule); padding:48px 0 60px; margin-top:clamp(4
 }
 .shot-cell .num{color:var(--amber); margin-right:.6em}
 
+/* ---- changelog ---- */
+.changelog{display:grid; gap:18px; max-width:760px}
+.logentry{padding:22px 26px}
+.logentry header{display:flex; align-items:baseline; gap:14px; margin-bottom:1rem; font-family:var(--mono)}
+.logentry .ver{font-weight:700; font-size:1.05rem; letter-spacing:.12em; color:var(--cyan)}
+.logentry .latest{font-size:.62rem; letter-spacing:.2em; text-transform:uppercase; color:var(--amber); border:1px solid var(--amber); padding:2px 8px; border-radius:2px}
+.logentry .when{margin-left:auto; font-size:.72rem; letter-spacing:.15em; text-transform:uppercase; color:var(--ink-faint)}
+.logentry ul{list-style:none; margin:0; padding:0; display:grid; gap:12px}
+.logentry li{display:flex; gap:12px; font-size:.95rem; color:var(--ink-dim)}
+.logentry li b{color:var(--ink); font-weight:600}
+.logentry li .dot{color:var(--amber); flex:none; font-family:var(--mono)}
+
 @media (prefers-reduced-motion: reduce){
   .btn,.feat{transition:none}
 }

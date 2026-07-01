@@ -9,6 +9,7 @@ namespace TitleScreen {
 
 enum : int {
   ItemNewGame = 0,
+  ItemLoadGame,
   ItemSound,
   ItemControls,
   ItemAbout,
@@ -18,6 +19,7 @@ struct MenuItem { const char* label; };
 
 inline const MenuItem items[] = {
   {"NEW GAME"},
+  {"LOAD GAME"},
   {"SOUND"},      // label resolved at draw time from Audio::muted
   {"CONTROLS"},
   {"ABOUT"},
@@ -38,9 +40,10 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   g.print("HAZKE");
   MenuUI::printCenter(g, 30, "- CARDPUTER EDITION -", TFT_CYAN);
 
-  // Menu items — vertically centered in the lower half.
-  const int firstY = 60;
-  const int itemH  = 14;
+  // Menu items — vertically centered in the lower half. Five rows at
+  // 13 px pitch end at y=116, clear of the hint line at ScreenH-13.
+  const int firstY = 54;
+  const int itemH  = 13;
   for (int i = 0; i < N; i++) {
     const char* label = items[i].label;
     if (i == ItemSound) label = Audio::muted ? "SOUND: OFF" : "SOUND: ON";

@@ -6,6 +6,7 @@
 #include <string.h>
 #include "Config.h"
 #include "Audio.h"
+#include "SDCard.h"
 
 // Screen capture to the microSD card.
 //
@@ -15,19 +16,10 @@
 // after the frame is drawn but before the confirmation toast is overlaid, so
 // the toast never ends up in the saved image.
 //
-// The M5Cardputer microSD slot lives on a shared SPI bus:
-//   CLK 40 · MISO 39 · MOSI 14 · CS 12
-// We bring it up lazily on the first capture so boot stays fast and a
-// card-less unit pays nothing until the player actually presses the hotkey.
+// Card bring-up is shared with the save system — see SDCard.h.
 
 namespace Screenshot {
 
-constexpr int PinSCK  = 40;
-constexpr int PinMISO = 39;
-constexpr int PinMOSI = 14;
-constexpr int PinCS   = 12;
-
-inline bool  sdReady      = false;
 inline int   nextIndex    = 0;
 inline bool  indexScanned = false;
 
@@ -36,18 +28,6 @@ inline char  toastMsg[32] = {0};
 inline float toastTimer   = 0.0f;
 inline bool  toastOk      = false;
 constexpr float ToastTime = 1.8f;
-
-inline bool ensureSD() {
-  if (sdReady) return true;
-  SPI.begin(PinSCK, PinMISO, PinMOSI, PinCS);
-  if (!SD.begin(PinCS, SPI, 25000000)) {
-    sdReady = false;
-    return false;
-  }
-  SD.mkdir("/hazke");
-  sdReady = true;
-  return true;
-}
 
 inline void makePath(char* out, size_t n, int idx) {
   snprintf(out, n, "/hazke/shot%04d.bmp", idx);
@@ -126,7 +106,7 @@ inline bool writeBMP(M5Canvas& cv, const char* path) {
 
 // Capture the fully-rendered frame to the SD card and arm the toast.
 inline void capture(M5Canvas& cv) {
-  if (!ensureSD()) {
+  if (!SDCard::ensure()) {
     snprintf(toastMsg, sizeof(toastMsg), "NO SD CARD");
     toastOk = false; toastTimer = ToastTime;
     Audio::deny();
@@ -145,7 +125,7 @@ inline void capture(M5Canvas& cv) {
     snprintf(toastMsg, sizeof(toastMsg), "SAVE FAILED");
     toastOk = false; toastTimer = ToastTime;
     Audio::deny();
-    sdReady = false;     // card may have been pulled — re-init next time
+    SDCard::markFailed();  // card may have been pulled — re-init next time
   }
 }
 

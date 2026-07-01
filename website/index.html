@@ -25,7 +25,7 @@
         <p class="hw-line"><span class="hw-pill">▣ A game for the M5Stack Cardputer</span> the pocket-size ESP32 handheld with a built-in keyboard.</p>
         <p class="hero-copy">A whole space-trading game that runs entirely on a <strong>240×135 screen</strong> — sixteen procedurally-built star systems, shaded polygon flight, a living economy and pirates that mean it. No phone, no cloud, no second device. Just the Cardputer in your hand and the void.</p>
         <div class="cta-row">
-          <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.1.0/hazke-v1.1.0-cardputer.bin" download><span class="k">▸</span> Download Firmware</a>
+          <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.2.0/hazke-v1.2.0-cardputer.bin" download><span class="k">▸</span> Download Firmware</a>
           <a class="btn" href="https://github.com/therezor/hazke" target="_blank" rel="noopener"><span class="k">◇</span> Source on GitHub</a>
           <span class="btn btn--label"><span class="k">▣</span> Available on Launcher</span>
         </div>
@@ -100,6 +100,7 @@
         <div class="panel keytable" aria-label="Control bindings">
           <div class="keyrow"><span class="kc"><kbd>↑</kbd><kbd>↓</kbd></span><span class="ka">Pitch nose up / down</span></div>
           <div class="keyrow"><span class="kc"><kbd>←</kbd><kbd>→</kbd></span><span class="ka">Roll / bank</span></div>
+          <div class="keyrow"><span class="kc"><kbd>L</kbd><kbd>'</kbd></span><span class="ka">Yaw left / right</span></div>
           <div class="keyrow"><span class="kc"><kbd>E</kbd><kbd>S</kbd></span><span class="ka">Accelerate / brake</span></div>
           <div class="keyrow"><span class="kc"><kbd>W</kbd></span><span class="ka">Fire laser</span></div>
           <div class="keyrow"><span class="kc"><kbd>R</kbd><kbd>A</kbd></span><span class="ka">Lock target / fire missile</span></div>
@@ -200,7 +201,7 @@
             <li><span class="dot">▸</span><span><b>M5Stack Cardputer</b> — ESP32-S3 with a built-in keyboard and a 1.14″ ST7789 screen.</span></li>
             <li><span class="dot">▸</span><span><b>A USB-C cable</b> to flash it from your computer.</span></li>
             <li><span class="dot">▸</span><span><b>A launcher or Arduino IDE</b> — load the prebuilt firmware, or open <code>hazke.ino</code> and upload.</span></li>
-            <li><span class="dot">▸</span><span><b>Nothing online.</b> The whole universe lives on the chip; every run starts a fresh commander.</span></li>
+            <li><span class="dot">▸</span><span><b>Nothing online.</b> The whole universe lives on the chip; saves go to internal flash or a microSD card.</span></li>
           </ul>
         </div>
 
@@ -209,10 +210,10 @@
           <ol>
             <li><b>Get the firmware</b>Grab Hazke from your launcher's app catalog, or build <code>hazke.ino</code> in the Arduino IDE with the board set to M5Cardputer.</li>
             <li><b>Flash over USB-C</b>Connect the Cardputer and upload. It boots straight to the title screen.</li>
-            <li><b>NEW GAME</b>Arrow to NEW GAME, press ENTER, and you'll wake at the jump gate of System 00 — the safe starter system. Go make some credits.</li>
+            <li><b>NEW GAME</b>Arrow to NEW GAME, type your commander's name, and you'll wake at the jump gate of System 00 — the safe starter system. Go make some credits.</li>
           </ol>
           <div class="start-cta">
-            <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.1.0/hazke-v1.1.0-cardputer.bin" download><span class="k">▸</span> Download</a>
+            <a class="btn btn--primary" href="https://github.com/therezor/hazke/releases/download/v1.2.0/hazke-v1.2.0-cardputer.bin" download><span class="k">▸</span> Download</a>
             <a class="btn" href="https://github.com/therezor/hazke" target="_blank" rel="noopener"><span class="k">◇</span> Build from Source</a>
             <span class="btn btn--label"><span class="k">▣</span> Available on Launcher</span>
           </div>
@@ -221,17 +222,56 @@
     </div>
   </section>
 
+  <!-- CHANGELOG -->
+  <section class="block" id="changelog">
+    <div class="wrap">
+      <div class="block-head">
+        <p class="eyebrow">Flight log</p>
+        <h2>Every release, on the record.</h2>
+        <p class="lead">What changed and when. Save files carry their own format version and upgrade automatically, so a commander from an older release keeps flying on a newer one.</p>
+      </div>
+
+      <div class="changelog">
+        <article class="panel logentry">
+          <header><span class="ver">V1.2</span><span class="latest">Latest</span><span class="when">July 2026</span></header>
+          <ul>
+            <li><span class="dot">▸</span><span><b>Save system.</b> Five save slots on internal flash and five more on the microSD card, with one-press copy between the two for backups. Saving happens planetside; loading puts you back on the same pad.</span></li>
+            <li><span class="dot">▸</span><span><b>Name your commander.</b> NEW GAME now asks for a name before you fly — leave it blank to answer to JAMESON like everyone before you.</span></li>
+            <li><span class="dot">▸</span><span><b>Yaw control.</b> L and ' — the keys flanking the up-arrow — turn the nose flat left and right, a slow third axis for fine aim on top of pitch and roll.</span></li>
+            <li><span class="dot">▸</span><span><b>Interface polish.</b> Save-menu layout fixes and snappier menus when no SD card is inserted.</span></li>
+          </ul>
+        </article>
+
+        <article class="panel logentry">
+          <header><span class="ver">V1.1</span><span class="when">June 2026</span></header>
+          <ul>
+            <li><span class="dot">▸</span><span><b>Interface fixes.</b> Cleaned up screen chrome bugs and stale control references across the menus.</span></li>
+            <li><span class="dot">▸</span><span><b>One version badge.</b> The title screen and About page now read from a single version source.</span></li>
+          </ul>
+        </article>
+
+        <article class="panel logentry">
+          <header><span class="ver">V1.0</span><span class="when">June 2026</span></header>
+          <ul>
+            <li><span class="dot">▸</span><span><b>First flight.</b> Sixteen procedurally-built star systems, free-flight polygon cockpit, a seventeen-commodity economy, lasers, missiles and ECM, planet-side mission boards, four factions and seven combat ranks — all on the Cardputer.</span></li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
   <footer>
     <div class="wrap">
       <div class="foot-grid">
-        <div class="foot-mark">HAZKE<span>VERSION 1.1 · CARDPUTER EDITION</span></div>
+        <div class="foot-mark">HAZKE<span>CARDPUTER EDITION</span></div>
         <nav class="foot-links" aria-label="Footer">
-          <a href="https://github.com/therezor/hazke/releases/download/v1.1.0/hazke-v1.1.0-cardputer.bin" download>Download</a>
+          <a href="https://github.com/therezor/hazke/releases/download/v1.2.0/hazke-v1.2.0-cardputer.bin" download>Download</a>
           <a href="https://github.com/therezor/hazke" target="_blank" rel="noopener">GitHub</a>
           <a href="#features">Features</a>
           <a href="#screens">Screens</a>
           <a href="#controls">Controls</a>
           <a href="#get">Get Started</a>
+          <a href="#changelog">Changelog</a>
         </nav>
       </div>
       <p class="colophon">An independent space-sim game for the M5Cardputer, inspired by Elite, Parkan: Imperial Chronicles and Galaxy on Fire 2. All code and the entire universe are original. Built on the metal in C++.</p>

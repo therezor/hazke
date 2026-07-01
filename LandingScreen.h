@@ -12,9 +12,9 @@
 //
 // A Parkan-style still: planet horizon at the bottom, a couple of dome-
 // interior struts framing the view, the planet's name as a header, and a
-// menu of LOCAL MARKET / EQUIP / QUESTS / STATUS / LAUNCH. There is no
-// walk-around — actions are picked from the menu and resolved by the
-// outer state machine in hazke.ino.
+// menu of LOCAL MARKET / EQUIP / QUESTS / STATUS / SAVE GAME / LAUNCH.
+// There is no walk-around — actions are picked from the menu and
+// resolved by the outer state machine in hazke.ino.
 //
 // State (`sysIdx`, `planetPOIidx`) is set by `enter()` so the screen
 // can keep painting after the SystemFlight layout is overwritten by
@@ -33,14 +33,16 @@ enum : int {
   ItemEquip,
   ItemQuests,
   ItemStatus,
+  ItemSave,
   ItemLaunch,
 };
-constexpr int N = 5;
+constexpr int N = 6;
 inline const char* items[N] = {
   "LOCAL MARKET",
   "EQUIP",
   "QUESTS",
   "STATUS",
+  "SAVE GAME",
   "LAUNCH",
 };
 
@@ -215,8 +217,9 @@ inline void draw(M5Canvas& g, const GameState& s, float phase) {
   g.setCursor(Config::ScreenW - w - 4, 4);
   g.print(buf);
 
-  // Menu — centered. Five rows at 11 px pitch fit comfortably between
-  // the planet header and the footer.
+  // Menu — centered. Six rows at 11 px pitch fit comfortably between
+  // the planet header and the footer (last row ends y=84, viewport
+  // bottom is 91).
   const int firstY = 22;
   const int itemH  = 11;
   for (int i = 0; i < N; i++) {

@@ -15,6 +15,7 @@ inline void draw(M5Canvas& g) {
   static const Row rows[] = {
     {"UP / DN",  "Pitch up / down"},
     {"LT / RT",  "Roll"},
+    {"L / '",    "Yaw left / right"},
     {"E / S",    "Accel / brake"},
     {"W",        "Fire laser"},
     {"R / A",    "Lock / fire missile"},
@@ -26,7 +27,9 @@ inline void draw(M5Canvas& g) {
   };
   constexpr int N = sizeof(rows) / sizeof(rows[0]);
 
-  int y = 19;
+  // 11 rows at 9 px pitch end at y=116, clear of the return hint at
+  // ScreenH-11.
+  int y = 18;
   for (int i = 0; i < N; i++) {
     g.setTextSize(1);
     g.setTextColor(MenuUI::LabelColor, TFT_BLACK);
@@ -35,7 +38,7 @@ inline void draw(M5Canvas& g) {
     g.setTextColor(MenuUI::ValueColor, TFT_BLACK);
     g.setCursor(78, y);
     g.print(rows[i].v);
-    y += 10;
+    y += 9;
   }
 
   MenuUI::printCenter(g, Config::ScreenH - 11,
