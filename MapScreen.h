@@ -16,7 +16,7 @@
 // list. Pressing ENTER on an entry promotes it to the in-flight marker
 // — POI → SystemFlight::state.targetIdx, NPC → state.lockedNPC — so the
 // cockpit picks the same target up the moment the player resumes.
-// F cycles the zoom (x1 whole system, x2 / x4 centred on the cursor).
+// F toggles a x2 zoom centred on the cursor (x1 frames the whole system).
 
 namespace MapScreen {
 
@@ -52,15 +52,15 @@ constexpr int PinHalfW = (PlotX1 - PlotX0) / 2 - 3;
 constexpr int PinHalfH = (PlotY1 - PlotY0) / 2 - 3;
 constexpr int PanelX = 118;
 
-// Zoom steps. x1 frames the whole system on the star; x2 / x4 centre on
+// Zoom toggle. x1 frames the whole system on the star; zoomed centres on
 // the cursor item so arrowing through the list pans the view.
-constexpr int NumZooms = 3;
-inline int   zoom = 0;            // 0 = x1, 1 = x2, 2 = x4
+constexpr int ZoomMul = 2;
+inline bool  zoomed = false;
 inline float fitR = SolarSystem::ZoneRadius;   // world radius shown at x1
 
-inline int zoomMul() { return 1 << zoom; }
+inline int zoomMul() { return zoomed ? ZoomMul : 1; }
 
-inline void cycleZoom() { zoom = (zoom + 1) % NumZooms; }
+inline void toggleZoom() { zoomed = !zoomed; }
 
 // World→plot scale (px per sysu) at the current zoom.
 inline float plotScale() {
@@ -158,14 +158,16 @@ inline void markSelected() {
 // Plot centre in world XZ: the star at x1, the cursor item when zoomed.
 inline void viewCenter(float& cx, float& cz) {
   cx = 0.0f; cz = 0.0f;
-  if (zoom == 0 || numItems <= 0) return;
+  if (!zoomed || numItems <= 0) return;
   cx = items[cursor].wx;
   cz = items[cursor].wz;
 }
 
-// World XZ → screen pixel. Anything outside the plot box is pinned just
-// inside its edge along its true bearing, so far ships and a deep-space
-// player still show which way they lie. Returns false if it was pinned.
+// World XZ → screen pixel. At x1, anything outside the plot box is pinned
+// just inside its edge along its true bearing, so far ships and a
+// deep-space player still show which way they lie. Zoomed, nothing is
+// pinned: off-view objects land outside the box and the plot clip hides
+// them. Returns false if the point is outside the box.
 inline bool worldToPlot(float wx, float wz, int& sx, int& sy) {
   float k = plotScale();
   float cx, cz;
@@ -173,7 +175,7 @@ inline bool worldToPlot(float wx, float wz, int& sx, int& sy) {
   float px = (wx - cx) * k, pz = (wz - cz) * k;
   float ax = fabsf(px), az = fabsf(pz);
   bool inside = (ax <= (float)PinHalfW && az <= (float)PinHalfH);
-  if (!inside) {
+  if (!inside && !zoomed) {
     float sxk = (ax > (float)PinHalfW) ? (float)PinHalfW / ax : 1.0f;
     float szk = (az > (float)PinHalfH) ? (float)PinHalfH / az : 1.0f;
     float m = sxk < szk ? sxk : szk;
@@ -245,12 +247,13 @@ inline float selectedDistance() {
   return sqrtf(dx*dx + dy*dy + dz*dz);
 }
 
-// On-plot glyph radius for a body: its true scaled size once zoom makes
-// that readable, never smaller than `minR`, capped so it can't swamp the box.
+// On-plot glyph radius for a body: its true scaled size (so the sun and
+// planets grow with the zoom), never smaller than `minR`. The plot clip
+// keeps anything big inside the box; the cap only bounds the fill cost.
 inline int bodyGlyphR(float worldR, int minR) {
   int r = (int)(worldR * plotScale() + 0.5f);
-  if (r < minR) r = minR;
-  if (r > 10)   r = 10;
+  if (r < minR)  r = minR;
+  if (r > PlotR) r = PlotR;
   return r;
 }
 
@@ -306,7 +309,9 @@ inline void draw(M5Canvas& g, const GameState& /*gs*/) {
     if (it.type == SelType::POI) {
       const auto& p = SystemFlight::layout.poi[it.idx];
       if (p.type == SolarSystem::POIType::JumpGate) {
-        g.drawCircle(sx, sy, 3, it.color);
+        // The ring is far below a pixel at true scale — keep the marker
+        // and grow it with the zoom like the bodies around it.
+        g.drawCircle(sx, sy, 3 * zoomMul(), it.color);
         g.drawPixel(sx, sy, TFT_WHITE);
       } else {
         g.fillCircle(sx, sy, bodyGlyphR((float)p.radius, 2), it.color);

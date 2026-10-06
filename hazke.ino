@@ -721,7 +721,7 @@ void loop() {
       if (mk.upE || mk.leftE)   MapScreen::moveSelection(-1);
       if (mk.downE || mk.rightE) MapScreen::moveSelection(+1);
       if (mk.enterE) MapScreen::markSelected();
-      if (mk.toggleE) { MapScreen::cycleZoom(); Audio::uiMove(); }
+      if (mk.toggleE) { MapScreen::toggleZoom(); Audio::uiMove(); }
       // 'M' is the open key from flight — pressing it again closes the map
       // the same way ESC would, so it acts as a toggle.
       if (mk.backE || mk.mapE) {
