@@ -25,10 +25,11 @@ inline void draw(M5Canvas& g) {
     {"H",        "Dock with ship"},
     {"M",        "System map"},
     {"ESC",      "Back / title"},
+    {"GYRO",     "Move to aim, ALT holds"},
   };
   constexpr int N = sizeof(rows) / sizeof(rows[0]);
 
-  // 12 rows at 8 px pitch end at y=114, clear of the return hint at
+  // 13 rows at 8 px pitch end at y=122, clear of the return hint at
   // ScreenH-11.
   int y = 18;
   for (int i = 0; i < N; i++) {

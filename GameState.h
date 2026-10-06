@@ -18,6 +18,11 @@ struct GameState {
   float rollRate;
   float yawRate;   // Z / X keys — flat nose-left/right turn
 
+  // Gyro aiming is turning the nose hard enough to take over from the
+  // autolock (pitch or yaw rate past GyroOverride).
+  static constexpr float GyroOverride = 0.5f;   // rad/s
+  bool gyroSteer;
+
   // HUD readouts (0..1)
   float shield;
   float hull;        // 0..1 direct ship integrity; lost to collisions / spillover
@@ -100,6 +105,7 @@ struct GameState {
     speed = 0.0f;
     pitchInput = rollInput = yawInput = 0.0f;
     pitchRate = rollRate = yawRate = 0.0f;
+    gyroSteer = false;
     shield = 1.0f;
     hull = 1.0f;
     credits = 1000; // shows as 100.0 CR
@@ -140,8 +146,12 @@ struct GameState {
     axis(rollInput,  in.rollRight, in.rollLeft);
     axis(yawInput,   in.yawRight,  in.yawLeft);
 
-    pitchRate = pitchInput * 1.5f;
-    rollRate  = rollInput  * 2.4f;
-    yawRate   = yawInput   * 1.1f;   // deliberately the slowest axis
+    // Gyro rates (0 unless gyro aiming is on) add straight on top, so
+    // the ship turns with the Cardputer while keys still work.
+    pitchRate = pitchInput * 1.5f + in.gyroPitch;
+    rollRate  = rollInput  * 2.4f + in.gyroRoll;
+    yawRate   = yawInput   * 1.1f + in.gyroYaw;   // keys: the slowest axis
+    gyroSteer = fabsf(in.gyroPitch) > GyroOverride ||
+                fabsf(in.gyroYaw)   > GyroOverride;
   }
 };

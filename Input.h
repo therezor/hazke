@@ -23,6 +23,12 @@ struct InputState {
   bool accel;
   bool decel;
   bool fire;
+  bool gyroHold;     // ALT held: freeze gyro aiming (Gyro.h)
+  // Gyro aiming turn rates (Gyro.h), filled in by the flight loop when
+  // enabled. Same units as GameState's pitch/roll/yawRate.
+  float gyroPitch;
+  float gyroYaw;
+  float gyroRoll;
 };
 
 inline void pollInput(InputState& in) {
@@ -34,6 +40,7 @@ inline void pollInput(InputState& in) {
   for (const char* k = injectedKeys; *k; k++) state.word.push_back(*k);
   // Ctrl+Space is the screenshot hotkey; don't also fire when it's held.
   const bool ctrlHeld = state.ctrl;
+  in.gyroHold = state.alt;
   for (auto c : state.word) {
     switch (c) {
       case ';': in.pitchUp    = true; break;

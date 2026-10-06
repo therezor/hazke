@@ -15,6 +15,8 @@
 //   F                           autolock: steer onto the marker (module)
 //   M                           local system map (chart opens at the gate)
 //   CTRL+SPACE                   save a screenshot to the SD card
+//   move the Cardputer (ADV)    aim, when GYRO is on in the menu
+//   ALT (held)                  freeze gyro aiming
 //   ENTER                       confirm / select (menu)
 //   `                           back / title
 //
@@ -55,6 +57,8 @@
 #include "Quest.h"
 #include "QuestScreen.h"
 #include "Audio.h"
+#include "Gyro.h"
+#include "Settings.h"
 #include "SDCard.h"
 #include "Screenshot.h"
 #include "SaveFormat.h"
@@ -125,6 +129,20 @@ static void stepSoundLevel(const MenuInput& mk) {
   }
 }
 
+// GYRO row: LEFT / RIGHT step OFF / 0.5X ... 3X, same feedback as
+// SOUND. Without an IMU every step buzzes.
+static void stepGyroMode(const MenuInput& mk) {
+  if (!mk.leftE && !mk.rightE) return;
+  if (Gyro::stepMode(mk.rightE ? +1 : -1)) Audio::missionAccept();
+  else                                     Audio::deny();
+}
+
+// ENTER on the GYRO row cycles the mode.
+static void cycleGyroMode() {
+  if (Gyro::cycleMode()) Audio::missionAccept();
+  else                   Audio::deny();
+}
+
 // ---- USB serial console -------------------------------------------------
 //
 // Line-based dev console on the USB serial port (any baud), for testing
@@ -133,6 +151,7 @@ static void stepSoundLevel(const MenuInput& mk) {
 //   credits <CR>           set credits (whole CR)
 //   save [1-5] [sd|int]    write the commander to a slot — defaults to
 //                          the slot the save menu last loaded / saved
+//   imu                    IMU sample, gyro drift and aiming output
 
 static const char* const modeNames[] = {
   "TITLE", "INFO", "ABOUT", "FLIGHT", "PAUSE", "MAP", "LANDED", "NPCTRADE",
@@ -254,9 +273,28 @@ static void runConsoleCommand(char* line) {
   } else if (strcmp(cmd, "shot") == 0) {
     if (Capture::lastFrame) Capture::sendFrame(*Capture::lastFrame);
     Serial.println("ok shot");
+  } else if (strcmp(cmd, "imu") == 0) {
+    // Device frame: X right, Y up the screen, Z out of the screen; flat
+    // on a desk, acc reads about 0,0,+1. "turn" is the player-space
+    // rotation in deg/s (+ nose up, + right, + right side down), "out"
+    // the ship rates it adds (0 unless flying with GYRO on).
+    if (!Gyro::sample()) { Serial.println("err no imu"); return; }
+    if (!Gyro::active()) Gyro::level();   // the filter only runs in flight
+    float pr[3];
+    Gyro::playerRates(pr);
+    const float r2d = 1.0f / Gyro::DegToRad;
+    Serial.printf("ok imu mode=%s acc=%.2f,%.2f,%.2f gyr=%.0f,%.0f,%.0f"
+                  " bias=%.1f,%.1f,%.1f turn=%.0f,%.0f,%.0f"
+                  " out=%.2f,%.2f,%.2f\n",
+                  Gyro::ModeNames[Gyro::mode % Gyro::ModeCount],
+                  Gyro::acc[0], Gyro::acc[1], Gyro::acc[2],
+                  Gyro::gyr[0] * r2d, Gyro::gyr[1] * r2d, Gyro::gyr[2] * r2d,
+                  Gyro::bias[0] * r2d, Gyro::bias[1] * r2d, Gyro::bias[2] * r2d,
+                  pr[0] * r2d, pr[1] * r2d, pr[2] * r2d,
+                  Gyro::outPitch, Gyro::outYaw, Gyro::outRoll);
   } else {
     Serial.println("err commands: status | credits <CR> | save [1-5] [sd|int]"
-                   " | cap on|off | keys <chars> | step|rec <n> | shot");
+                   " | cap on|off | keys <chars> | step|rec <n> | shot | imu");
   }
 }
 
@@ -392,6 +430,8 @@ void setup() {
   // Speaker + SFX arena (synthesized now, played back by the speaker
   // task). Sound outranks the second frame buffer: if the arena doesn't
   // fit, give the buffer back and retry.
+  // Stored SOUND / GYRO options, before the speaker comes up.
+  Settings::load();
   bool audioOk = Audio::begin();
   if (!audioOk && haveB) {
     canvasB.deleteSprite();
@@ -408,8 +448,9 @@ void setup() {
   // in-flight DMA, which would make every push synchronous again. The SD
   // card sits on a separate SPI host, so nothing else needs this bus.
   if (doubleBuffered) M5Cardputer.Display.startWrite();
-  Serial.printf("[boot] double buffer %s, audio %s, free heap %u, largest DMA block %u\n",
+  Serial.printf("[boot] double buffer %s, audio %s, imu %s, free heap %u, largest DMA block %u\n",
                 doubleBuffered ? "on" : "OFF", audioOk ? "ok" : "FAILED",
+                Gyro::available() ? "ok" : "none",
                 (unsigned)ESP.getFreeHeap(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
 
@@ -465,6 +506,9 @@ static void selectMenuItem() {
       Audio::cycleLevel();
       if (!Audio::muted()) Audio::missionAccept();
       break;
+    case TitleScreen::ItemGyro:
+      cycleGyroMode();
+      break;
     case TitleScreen::ItemControls:
       infoReturn = GameMode::Title;
       mode = GameMode::Info;
@@ -500,6 +544,13 @@ void loop() {
 
   MenuInput mk = pollMenuInput();
   if (!Capture::lockstep) pollSerialConsole();
+  Settings::sync();   // persist a SOUND / GYRO change from last frame
+
+  // Mode on the previous frame. Gyro aiming re-levels its vertical on
+  // entering flight, since its filter doesn't run in the menus.
+  static GameMode lastMode = mode;
+  const bool modeEntered = mode != lastMode;
+  lastMode = mode;
 
   // Global screenshot hotkey: Ctrl+Space writes the current frame to SD.
   // Edge-detected so a held combo snaps exactly one shot.
@@ -517,6 +568,7 @@ void loop() {
     case GameMode::Title: {
       menuSfx(mk);
       if (menuSelected == TitleScreen::ItemSound) stepSoundLevel(mk);
+      if (menuSelected == TitleScreen::ItemGyro)  stepGyroMode(mk);
       if (mk.upE) {
         menuSelected = (menuSelected - 1 + TitleScreen::N) % TitleScreen::N;
       } else if (mk.downE) {
@@ -553,6 +605,11 @@ void loop() {
 
     case GameMode::SystemFlight: {
       pollInput(input);
+      if (Gyro::active()) {
+        Gyro::update(dt, modeEntered);
+        if (!input.gyroHold)
+          Gyro::read(input.gyroPitch, input.gyroYaw, input.gyroRoll);
+      }
       // While warping, player flight input is locked out — game.update
       // still ticks HUD bars (laser cooldown) but the heading/throttle
       // path in SystemFlight::update ignores it on the warp branch.
@@ -759,6 +816,7 @@ void loop() {
       PauseMenu::tick(dt);
       menuSfx(mk);
       if (PauseMenu::selected == PauseMenu::ItemSound) stepSoundLevel(mk);
+      if (PauseMenu::selected == PauseMenu::ItemGyro)  stepGyroMode(mk);
       if (mk.upE)   PauseMenu::moveUp();
       if (mk.downE) PauseMenu::moveDown();
       // ESC always resumes — quick way out without scrolling.
@@ -784,6 +842,9 @@ void loop() {
             // the new level.
             Audio::cycleLevel();
             if (!Audio::muted()) Audio::missionAccept();
+            break;
+          case PauseMenu::ItemGyro:
+            cycleGyroMode();
             break;
           case PauseMenu::ItemControls:
             infoReturn = GameMode::Pause;

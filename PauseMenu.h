@@ -7,6 +7,7 @@
 #include "Quest.h"
 #include "Galaxy.h"
 #include "Audio.h"
+#include "Gyro.h"
 
 // In-game pause menu. Triggered by ESC from SystemFlight; covers the
 // frame with a dimmed overlay so the player still sees a hint of the
@@ -19,6 +20,7 @@ enum : int {
   ItemResume = 0,
   ItemMap,
   ItemSound,
+  ItemGyro,
   ItemControls,
   ItemExit,
 };
@@ -27,6 +29,7 @@ inline const char* items[] = {
   "RESUME",
   "MAP",
   "SOUND",        // label resolved at draw time from Audio::level
+  "GYRO",         // label resolved at draw time from Gyro::mode
   "CONTROLS",
   "EXIT TO MENU",
 };
@@ -67,17 +70,18 @@ inline void draw(M5Canvas& g, float phase) {
       snprintf(step, sizeof(step), "NO ACTIVE QUEST");
       col = TFT_DARKGREY;
     }
-    MenuUI::printCenter(g, 22, step, col);
+    MenuUI::printCenter(g, 16, step, col);
   }
 
-  // Centered list. Push it down so the quest banner has room above it.
-  // itemH=16 matches the textSize-2 default glyph height in
-  // drawBigMenuItem; tighter pitches would overlap.
+  // Centered list below the quest banner; six rows end at y=122, just
+  // above the footer rule. itemH=16 matches the textSize-2 default glyph
+  // height in drawBigMenuItem; tighter pitches would overlap.
   const int itemH  = 16;
-  const int firstY = 36;
+  const int firstY = 26;
   for (int i = 0; i < N; i++) {
     const char* label = items[i];
     if (i == ItemSound) label = Audio::soundLabel(i == selected);
+    if (i == ItemGyro)  label = Gyro::label(i == selected);
     MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phase);
   }

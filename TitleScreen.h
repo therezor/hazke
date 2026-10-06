@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "MenuUI.h"
 #include "Audio.h"
+#include "Gyro.h"
 
 namespace TitleScreen {
 
@@ -11,6 +12,7 @@ enum : int {
   ItemNewGame = 0,
   ItemLoadGame,
   ItemSound,
+  ItemGyro,
   ItemControls,
   ItemAbout,
 };
@@ -21,6 +23,7 @@ inline const MenuItem items[] = {
   {"NEW GAME"},
   {"LOAD GAME"},
   {"SOUND"},      // label resolved at draw time from Audio::level
+  {"GYRO"},       // label resolved at draw time from Gyro::mode
   {"CONTROLS"},
   {"ABOUT"},
 };
@@ -40,13 +43,14 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   g.print("HAZKE");
   MenuUI::printCenter(g, 30, "- CARDPUTER EDITION -", TFT_CYAN);
 
-  // Menu items — vertically centered in the lower half. Five rows at
-  // 13 px pitch end at y=116, clear of the hint line at ScreenH-13.
-  const int firstY = 54;
-  const int itemH  = 13;
+  // Menu items — vertically centered in the lower half. Six rows at
+  // 12 px pitch end at y=116, clear of the hint line at ScreenH-13.
+  const int firstY = 48;
+  const int itemH  = 12;
   for (int i = 0; i < N; i++) {
     const char* label = items[i].label;
     if (i == ItemSound) label = Audio::soundLabel(i == selected);
+    if (i == ItemGyro)  label = Gyro::label(i == selected);
     MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phaseSec, /*destructive=*/false,
                             MenuUI::DisabledColor, /*textSize=*/1);

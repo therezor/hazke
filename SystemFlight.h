@@ -520,6 +520,7 @@ inline void steerAutolock(GameState& g) {
   float lat = sqrtf(cx * cx + cy * cy);
   float err = atan2f(lat, cz);
   autoAimErr = err;
+  if (g.gyroSteer) return;
   if (fabsf(g.pitchInput) > AutoOverride || fabsf(g.yawInput) > AutoOverride) return;
   float ep, ey;
   if (lat < 1e-3f) { ep = err; ey = 0.0f; }
