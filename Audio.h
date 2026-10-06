@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Sound effects (R28, reworked R32, rebuilt v1.3).
+// Sound effects (R28, reworked R32).
 //
 // Every effect is synthesized once at boot into an 8-bit PCM arena and
 // played with a single Speaker.playRaw() call, so playback never blocks
