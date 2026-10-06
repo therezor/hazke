@@ -115,7 +115,7 @@ struct SaveDataV1 {
 static_assert(sizeof(SaveQuestSlotV1) == 13, "V1 layout is frozen");
 static_assert(sizeof(SaveDataV1) == 82, "V1 layout is frozen");
 
-// ---- Version 2 (AUTOLOCK module) ---------------------------------------
+// ---- Version 2 (game release v1.3, AUTOLOCK module) --------------------
 //
 // Append-only over V1: every V1 field in the same order, then the new
 // equipment flag. V1 files upgrade by prefix copy (see migrate()).
