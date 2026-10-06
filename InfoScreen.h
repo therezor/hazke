@@ -20,6 +20,7 @@ inline void draw(M5Canvas& g) {
     {"W",        "Fire laser"},
     {"R / A",    "Lock / fire missile"},
     {"Q",        "ECM blast"},
+    {"F",        "Autolock (if fitted)"},
     {"TAB",      "Cycle target"},
     {"H",        "Dock with ship"},
     {"M",        "System map"},
@@ -27,7 +28,7 @@ inline void draw(M5Canvas& g) {
   };
   constexpr int N = sizeof(rows) / sizeof(rows[0]);
 
-  // 11 rows at 9 px pitch end at y=116, clear of the return hint at
+  // 12 rows at 8 px pitch end at y=114, clear of the return hint at
   // ScreenH-11.
   int y = 18;
   for (int i = 0; i < N; i++) {
@@ -38,7 +39,7 @@ inline void draw(M5Canvas& g) {
     g.setTextColor(MenuUI::ValueColor, TFT_BLACK);
     g.setCursor(78, y);
     g.print(rows[i].v);
-    y += 9;
+    y += MenuUI::DenseRowH;
   }
 
   MenuUI::printCenter(g, Config::ScreenH - 11,

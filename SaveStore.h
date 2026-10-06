@@ -24,7 +24,7 @@
 
 namespace SaveGame {
 
-// SaveDataV1 hard-codes these game constants. If one changes, the save
+// The frozen payloads hard-code these game constants. If one changes, the save
 // layer must NOT silently reinterpret old files — fail the build here and
 // ship a SaveDataV2 + transformer instead.
 static_assert((int)Market::N == 17,           "commodity count changed — needs a new save version");
@@ -47,6 +47,7 @@ inline void capture(SaveFormat::SaveData& d, const GameState& g,
   d.missiles  = g.missiles;
   d.ecmOwned  = g.ecm ? 1 : 0;
   d.laserTier = g.laserTier;
+  d.autolockOwned = g.autolock ? 1 : 0;
   memcpy(d.standing, g.standing, sizeof d.standing);
   d.lastSeenRank = g.lastSeenRank;
   d.arcStage     = g.arcStage;
@@ -96,6 +97,7 @@ inline void apply(const SaveFormat::SaveData& d, GameState& g,
   g.missiles  = d.missiles > 4 ? 4 : d.missiles;
   g.ecm       = d.ecmOwned != 0;
   g.laserTier = d.laserTier > 2 ? 2 : d.laserTier;
+  g.autolock  = d.autolockOwned != 0;
   for (int i = 0; i < GameState::NumFactions; i++) {
     int8_t s = d.standing[i];
     g.standing[i] = s < -100 ? -100 : (s > 100 ? 100 : s);

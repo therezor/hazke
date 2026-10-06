@@ -21,13 +21,14 @@ struct Item {
   uint16_t    priceCR;   // base price in whole credits; REPAIR is dynamic
 };
 
-constexpr int N = 7;
+constexpr int N = 8;
 
 enum : int {
   ItemRepair = 0,
   ItemRepairShield,
   ItemMissile,
   ItemECM,
+  ItemAutolock,
   ItemLargeHold,
   ItemBeamLaser,
   ItemMilLaser,
@@ -47,6 +48,7 @@ inline const Item items[N] = {
   {"REPAIR SHIELD", RepairShieldCR},
   {"MISSILE",       30},
   {"ECM SYSTEM",   600},
+  {"AUTOLOCK",     300},
   {"LARGE HOLD",   400},
   {"BEAM LASER",  1000},
   {"MIL LASER",   6000},
@@ -97,6 +99,7 @@ inline const char* statusFor(int idx, const GameState& s) {
     }
     case ItemMissile:    return (s.missiles >= 4)              ? "MAX 4"     : "";
     case ItemECM:        return s.ecm                          ? "OWNED"     : "";
+    case ItemAutolock:   return s.autolock                     ? "OWNED"     : "";
     case ItemLargeHold:  return (s.cargoMax >= s.CargoMaxLarge) ? "OWNED"     : "";
     case ItemBeamLaser:  return (s.laserTier >= 1)             ? "OWNED"     : "";
     case ItemMilLaser:   return (s.laserTier >= 2)             ? "OWNED"
@@ -116,6 +119,7 @@ inline void apply(int idx, GameState& s) {
       break;
     case ItemMissile:    s.missiles++;                  break;
     case ItemECM:        s.ecm = true;                  break;
+    case ItemAutolock:   s.autolock = true;             break;
     case ItemLargeHold:  s.cargoMax = s.CargoMaxLarge;  break;
     case ItemBeamLaser:  s.laserTier = 1;               break;
     case ItemMilLaser:   s.laserTier = 2;               break;

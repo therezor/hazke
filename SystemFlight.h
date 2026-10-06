@@ -109,6 +109,7 @@ struct Kin {
   bool  deathFinished;// set when timer expires; outer loop transitions to GameOver
   bool  outOfZone;    // past SolarSystem::ZoneRadius — deep space, markers hidden
   float zoneToast;    // seconds left on the LEAVING / ENTERING banner
+  bool  autoLock;     // AUTOLOCK engaged — nose steers onto the marker (F)
 };
 
 constexpr float DeathAnimTime = 2.2f;   // seconds
@@ -125,7 +126,8 @@ inline Kin state = {
   0.0f, 1.0f, 0.0f, // up = +Y
   false, -1, 0, false, -1,
   false, 0.0f, false,
-  false, 0.0f
+  false, 0.0f,
+  false
 };
 
 // Re-orthonormalize the camera basis. Tiny drift accumulates each frame;
@@ -148,6 +150,24 @@ constexpr float LockConeRad = 0.45f;   // ~26° half-angle
 // Lock range generous enough to grab anything inside the system cube —
 // the cone is the real selectivity, distance shouldn't be a blocker.
 constexpr float LockMaxRange = 30000.0f;
+
+// Per-slot patrol hostility from the player's faction standing, rebuilt
+// every update(). Kept here (not a local) so markers can read it.
+inline bool patrolHostile[NPCShip::MaxNPCs] = {};
+
+// Is this NPC slot out to get the player? Same rule NPCShip::update uses
+// for `huntsPlayer`: pirates, patrols of a soured faction, and anything
+// the player has shot. Drives the green / red ship markers, so a trader
+// turns red the moment it's provoked.
+inline bool shipHostile(int i) {
+  const auto& sh = NPCShip::ships[i];
+  return sh.role == NPCShip::Role::Pirate || sh.provoked || patrolHostile[i];
+}
+
+// Marker color for an NPC slot: green friendly, red hostile.
+inline uint16_t shipMarkerColor(int i) {
+  return shipHostile(i) ? TFT_RED : TFT_GREEN;
+}
 
 // Belt rock cache. `activeBelt` is the POI index of the planet whose
 // belt we're currently inside, or -1.
@@ -236,6 +256,7 @@ inline void enter(int sysIdx, SpawnAt /*where*/) {
   state.deathTimer     = 0.0f;
   state.outOfZone      = false;
   state.zoneToast      = 0.0f;
+  state.autoLock       = false;
 
   int gateI = -1;
   for (int i = 0; i < layout.numPOIs; i++) {
@@ -362,6 +383,198 @@ inline void validateLock() {
   }
 }
 
+// ---------- Autolock ----------
+//
+// The AUTOLOCK module (EquipScreen) is a steering assist on top of the
+// existing marker: whatever TAB / R / the map selected — a ship in
+// lockedNPC or a POI in targetIdx — F swings the nose onto it and keeps
+// it there. It only overrides the pitch/yaw rates the keys produced, so
+// the normal integrator in update() does the turning; roll stays with
+// the pilot, and held pitch/yaw keys win for as long as they're held.
+
+constexpr float AutoGain      = 6.0f;   // rad/s of turn rate per rad of error
+constexpr float AutoPitchMax  = 1.2f;   // rad/s — just under manual 1.5
+constexpr float AutoYawMax    = 1.0f;   // rad/s — just under manual 1.1
+constexpr float AutoOverride  = 0.1f;   // |smoothed key axis| that takes over
+constexpr float AutoAlignRad  = 0.03f;  // HUD "on target" threshold
+constexpr float AutoAcquireCos = 0.5f;  // F with no marker: 60° half-cone
+
+// Nose-to-aim-point error from the last steering pass (radians). HUD only.
+inline float autoAimErr = 3.1415927f;
+
+// World position of the current marker. False if nothing (alive) is marked.
+inline bool autoTarget(float& wx, float& wy, float& wz) {
+  if (state.lockedNPC >= 0 && state.lockedNPC < NPCShip::MaxNPCs) {
+    const auto& sh = NPCShip::ships[state.lockedNPC];
+    if (!sh.active) return false;
+    wx = sh.wx; wy = sh.wy; wz = sh.wz;
+    return true;
+  }
+  if (state.targetIdx >= 0 && state.targetIdx < layout.numPOIs) {
+    const auto& p = layout.poi[state.targetIdx];
+    if (p.type == SolarSystem::POIType::Star) return false;
+    wx = (float)p.x; wy = (float)p.y; wz = (float)p.z;
+    return true;
+  }
+  return false;
+}
+
+// Sun detour. Planets sit on both sides of the star, so a straight line
+// between them can cut through the corona. If the run to the aim point
+// dips inside the HEAT warning radius, steer for the tangent of a ring
+// just outside it instead; the ship slides round the ring until the
+// straight line to the target is clear. (Aiming at a waypoint along the
+// closest-approach direction instead spirals the ship inward.)
+inline void autoAvoidSun(float& tx, float& ty, float& tz) {
+  float sr = starRadius();
+  if (sr <= 1.0f) return;
+  const float safeR = sr + SunHeatBuffer
+                    - SunWarnFrac * (SunHeatBuffer - SunCriticalBuffer);
+  const float safe2 = safeR * safeR;
+  // A target inside the heat band itself (a ship skimming the star) is
+  // the pilot's call — just go.
+  if (tx*tx + ty*ty + tz*tz < safe2) return;
+  float px = state.px, py = state.py, pz = state.pz;
+  float sx = tx - px, sy = ty - py, sz = tz - pz;
+  float seg2 = sx*sx + sy*sy + sz*sz;
+  if (seg2 < 1.0f) return;
+  // Closest approach of the straight run to the star. Past the far end
+  // it's the target (outside, checked above); before the near end it's
+  // the ship itself.
+  float t = -(px*sx + py*sy + pz*sz) / seg2;
+  if (t >= 1.0f) return;
+  if (t < 0.0f) t = 0.0f;
+  float qx = px + sx * t, qy = py + sy * t, qz = pz + sz * t;
+  if (qx*qx + qy*qy + qz*qz >= safe2) return;
+
+  // Detour round a ring just outside the band. ph = radial unit vector,
+  // wh = unit direction from it toward the target around the ring.
+  float r = sqrtf(px*px + py*py + pz*pz);
+  float phx, phy, phz;
+  if (r < 1.0f) { phx = state.fx; phy = state.fy; phz = state.fz; r = 1.0f; }
+  else          { phx = px / r;   phy = py / r;   phz = pz / r; }
+  float k = tx*phx + ty*phy + tz*phz;
+  float wx = tx - phx * k, wy = ty - phy * k, wz = tz - phz * k;
+  float wl = sqrtf(wx*wx + wy*wy + wz*wz);
+  if (wl < 1.0f) {
+    // Target dead opposite — go over the ship's up side.
+    k = state.ux*phx + state.uy*phy + state.uz*phz;
+    wx = state.ux - phx * k; wy = state.uy - phy * k; wz = state.uz - phz * k;
+    wl = sqrtf(wx*wx + wy*wy + wz*wz);
+    if (wl < 1e-4f) { wx = -phz; wy = 0.0f; wz = phx; wl = sqrtf(wx*wx + wz*wz) + 1e-6f; }
+  }
+  wx /= wl; wy /= wl; wz /= wl;
+
+  const float ringR = safeR * 1.15f;
+  float dx, dy, dz;
+  if (r > ringR) {
+    // Head for the tangent point: that line grazes the ring and never
+    // enters it, and re-aiming every frame slides the ship round it.
+    float ca = ringR / r, sa = sqrtf(1.0f - ca * ca);
+    dx = ringR * (ca * phx + sa * wx) - px;
+    dy = ringR * (ca * phy + sa * wy) - py;
+    dz = ringR * (ca * phz + sa * wz) - pz;
+  } else {
+    // On or inside the ring: run tangentially with an outward bias.
+    dx = wx + 0.35f * phx; dy = wy + 0.35f * phy; dz = wz + 0.35f * phz;
+  }
+  float dl = sqrtf(dx*dx + dy*dy + dz*dz);
+  if (dl < 1e-4f) return;
+  // A fixed lookahead keeps the aim point well ahead of the nose even
+  // as the tangent point closes in.
+  const float Lookahead = 4000.0f;
+  tx = px + dx / dl * Lookahead;
+  ty = py + dy / dl * Lookahead;
+  tz = pz + dz / dl * Lookahead;
+}
+
+// Turn the marker into pitch/yaw rate commands. Called from update()
+// after GameState::update set the rates from the keys and before they
+// are integrated. Drops the lock (with the fail tone) when the marker is
+// gone or the player has left the zone — markers don't exist out there.
+inline void steerAutolock(GameState& g) {
+  if (!state.autoLock) return;
+  float tx, ty, tz;
+  if (state.outOfZone || !autoTarget(tx, ty, tz)) {
+    state.autoLock = false;
+    Audio::lockFail();
+    return;
+  }
+  autoAvoidSun(tx, ty, tz);
+
+  // Aim point in the ship frame (right = up × forward).
+  float dx = tx - state.px, dy = ty - state.py, dz = tz - state.pz;
+  float rx = state.uy * state.fz - state.uz * state.fy;
+  float ry = state.uz * state.fx - state.ux * state.fz;
+  float rz = state.ux * state.fy - state.uy * state.fx;
+  float cx = dx * rx       + dy * ry       + dz * rz;
+  float cy = dx * state.ux + dy * state.uy + dz * state.uz;
+  float cz = dx * state.fx + dy * state.fy + dz * state.fz;
+
+  // Total off-nose angle, split along the (right, up) direction to the
+  // target so the nose travels the short way round. Dead astern there is
+  // no direction — pull up.
+  float lat = sqrtf(cx * cx + cy * cy);
+  float err = atan2f(lat, cz);
+  autoAimErr = err;
+  if (fabsf(g.pitchInput) > AutoOverride || fabsf(g.yawInput) > AutoOverride) return;
+  float ep, ey;
+  if (lat < 1e-3f) { ep = err; ey = 0.0f; }
+  else             { ep = err * cy / lat; ey = err * cx / lat; }
+  float pr = AutoGain * ep, yr = AutoGain * ey;
+  // One shared scale keeps the turn direction while respecting both caps.
+  float k = 1.0f;
+  if (fabsf(pr) * k > AutoPitchMax) k = AutoPitchMax / fabsf(pr);
+  if (fabsf(yr) * k > AutoYawMax)   k = AutoYawMax   / fabsf(yr);
+  g.pitchRate = pr * k;
+  g.yawRate   = yr * k;
+}
+
+inline bool autoAligned() { return state.autoLock && autoAimErr < AutoAlignRad; }
+
+// F: toggle the autolock. Engages on the current marker; with nothing
+// marked it first grabs whatever sits closest to the nose (ship or
+// non-star POI) inside a wide cone.
+inline void toggleAutolock(const GameState& g) {
+  if (!g.autolock) { Audio::deny(); return; }
+  if (state.autoLock) {
+    state.autoLock = false;
+    Audio::uiBack();
+    return;
+  }
+  if (state.outOfZone) { Audio::lockFail(); return; }
+  float tx, ty, tz;
+  if (!autoTarget(tx, ty, tz)) {
+    int   bestPOI = -1, bestNPC = -1;
+    float bestDot = AutoAcquireCos;
+    auto score = [&](float wx, float wy, float wz, float maxRange) -> float {
+      float dx = wx - state.px, dy = wy - state.py, dz = wz - state.pz;
+      float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+      if (dist < 1.0f || dist > maxRange) return -2.0f;
+      return (dx * state.fx + dy * state.fy + dz * state.fz) / dist;
+    };
+    for (int i = 0; i < layout.numPOIs; i++) {
+      const auto& p = layout.poi[i];
+      if (p.type == SolarSystem::POIType::Star) continue;
+      float d = score((float)p.x, (float)p.y, (float)p.z, 1e9f);
+      if (d > bestDot) { bestDot = d; bestPOI = i; }
+    }
+    for (int i = 0; i < NPCShip::MaxNPCs; i++) {
+      const auto& sh = NPCShip::ships[i];
+      if (!sh.active) continue;
+      float d = score(sh.wx, sh.wy, sh.wz, LockMaxRange);
+      if (d > bestDot) { bestDot = d; bestNPC = i; bestPOI = -1; }
+    }
+    if (bestNPC < 0 && bestPOI < 0) { Audio::lockFail(); return; }
+    // Marker stays exclusive, same as cycleTarget.
+    state.lockedNPC = bestNPC;
+    state.targetIdx = bestPOI;
+  }
+  state.autoLock = true;
+  autoAimErr = 3.1415927f;
+  Audio::lockOn();
+}
+
 // J: try to engage warp toward the current target. Refuses if already
 // inside WarpMinRange (you're effectively there). Cancels any input.
 inline bool engageWarp() {
@@ -380,6 +593,7 @@ inline void cancelWarp() { state.warping = false; }
 inline void triggerDeath() {
   if (state.dying) return;
   state.dying      = true;
+  state.autoLock   = false;
   state.deathTimer = DeathAnimTime;
   Audio::explosion();
 }
@@ -439,6 +653,10 @@ inline void update(GameState& g, float dt) {
     if (targetDistance() < WarpDropRange) state.warping = false;
     return;
   }
+
+  // Autolock may replace the key-driven pitch/yaw rates before they're
+  // integrated below.
+  steerAutolock(g);
 
   // Local-axis rotation. pitchRate rotates forward+up around the right
   // axis (nose up/down in ship frame); yawRate rotates forward around up
@@ -579,7 +797,6 @@ inline void update(GameState& g, float dt) {
   // standing. Patrols of a faction the player has soured (≤ -30) chase
   // and fire like pirates; otherwise they wander peacefully. System 0
   // is the friendly starter zone — patrols there never engage.
-  bool patrolHostile[NPCShip::MaxNPCs];
   const bool friendlySystem = (state.loadedSys == 0);
   for (int i = 0; i < NPCShip::MaxNPCs; i++) {
     const auto& sh = NPCShip::ships[i];
@@ -1438,15 +1655,11 @@ inline void renderRadarBlips(M5Canvas& g) {
       if (dNorm > 1.0f) dNorm = 1.0f;
       int bx = RadarCX + (int)((cx / horiz) * (RadarRX - 1) * dNorm);
       int by = RadarCY - (int)((cz / horiz) * (RadarRY - 1) * dNorm);
-      g.drawPixel(bx, by, sh.color);
-      // R21: ring the locked NPC's blip so the player can spot it
-      // even when the silhouette is off-screen.
-      if (i == state.lockedNPC) {
-        g.drawPixel(bx - 1, by, TFT_RED);
-        g.drawPixel(bx + 1, by, TFT_RED);
-        g.drawPixel(bx, by - 1, TFT_RED);
-        g.drawPixel(bx, by + 1, TFT_RED);
-      }
+      // R21: box the locked NPC's blip so the player can spot it even
+      // when the silhouette is off-screen.
+      if (i == state.lockedNPC) g.drawRect(bx - 1, by - 1, 4, 4, TFT_WHITE);
+      // Green friendly / red hostile, 2×2 so it reads over the rings.
+      g.fillRect(bx, by, 2, 2, shipMarkerColor(i));
     }
   }
 
@@ -1551,7 +1764,7 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
       : (sh.role == NPCShip::Role::Patrol) ? "LOCK PATROL"
                                            : "LOCK TRADER";
     int len = (int)strlen(tag);
-    g.setTextColor(TFT_RED, TFT_BLACK);
+    g.setTextColor(shipMarkerColor(state.lockedNPC), TFT_BLACK);
     g.setCursor(Config::ScreenW - len * 6 - 3, 13);
     g.print(tag);
   }
@@ -1607,6 +1820,26 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     g.setTextColor(TFT_ORANGE, TFT_BLACK);
     g.setCursor(x, Config::ViewY + 3);
     g.print(tag);
+  }
+
+  // Autolock engaged: AUTO in the footer gap between CR and BAT, and the
+  // reticle re-tinted. Blinking cyan while the nose swings onto the
+  // target, steady green once it's on.
+  if (state.autoLock) {
+    bool on = autoAligned();
+    bool show = on || ((millis() / 250u) & 1u) == 0u;
+    uint16_t col = on ? TFT_GREEN : TFT_CYAN;
+    if (show) {
+      g.setTextColor(col, TFT_BLACK);
+      g.setCursor((Config::ScreenW - 4 * 6) / 2, Config::FooterY + 1);
+      g.print("AUTO");
+    }
+    int cx = Config::ViewX + Config::ViewW / 2;
+    int cy = Config::ViewY + Config::ViewH / 2;
+    g.drawFastHLine(cx - 6, cy, 5, col);
+    g.drawFastHLine(cx + 2, cy, 5, col);
+    g.drawFastVLine(cx, cy - 6, 5, col);
+    g.drawFastVLine(cx, cy + 2, 5, col);
   }
 
   // Zone crossing banner, one row under the promotion slot.
@@ -1677,6 +1910,8 @@ inline void bumpOffGate() {
     }
   }
   if (gateI < 0) return;
+  // An autolock on the gate would fly us straight back into the ring.
+  state.autoLock = false;
   const auto& g = layout.poi[gateI];
   float gx = (float)g.x, gy = (float)g.y, gz = (float)g.z;
   float glen = sqrtf(gx*gx + gz*gz);
@@ -1746,6 +1981,9 @@ inline void enterNearPOI(int sysIdx, int poiIdx, float standoff) {
   activeBelt = -1;
   state.outOfZone = false;
   state.zoneToast = 0.0f;
+  // The launch re-targets the planet we just left — autolock must not
+  // carry over or it would steer straight back into it.
+  state.autoLock  = false;
   if (switched) {
     NPCShip::spawnFor(sysIdx, layout);
     Combat::resetFlashes();
@@ -2124,14 +2362,15 @@ inline bool drawWorldMarker(M5Canvas& g,
   return false;
 }
 
-// Bracket / arrow for the locked NPC (red).
+// Bracket / arrow for the locked NPC — green friendly, red hostile.
 inline void renderLockBracket(M5Canvas& g) {
   if (state.lockedNPC < 0 || state.lockedNPC >= NPCShip::MaxNPCs) return;
   const auto& sh = NPCShip::ships[state.lockedNPC];
   if (!sh.active) return;
   // In deep space only a ship you can actually see keeps its bracket —
   // the off-screen arrow is hidden with the other target markers.
-  bool onScreen = drawWorldMarker(g, sh.wx, sh.wy, sh.wz, TFT_RED,
+  bool onScreen = drawWorldMarker(g, sh.wx, sh.wy, sh.wz,
+                                  shipMarkerColor(state.lockedNPC),
                                   !state.outOfZone);
   if (state.outOfZone && !onScreen) return;
 

@@ -115,9 +115,52 @@ struct SaveDataV1 {
 static_assert(sizeof(SaveQuestSlotV1) == 13, "V1 layout is frozen");
 static_assert(sizeof(SaveDataV1) == 82, "V1 layout is frozen");
 
+// ---- Version 2 (AUTOLOCK module) ---------------------------------------
+//
+// Append-only over V1: every V1 field in the same order, then the new
+// equipment flag. V1 files upgrade by prefix copy (see migrate()).
+
+#pragma pack(push, 1)
+struct SaveDataV2 {
+  char     commanderName[12];
+  int32_t  credits;
+  int32_t  kills;
+  float    shield;
+  float    hull;
+  float    hullHeat;
+  uint8_t  cargoMax;
+  uint8_t  cargo[17];
+  uint8_t  missiles;
+  uint8_t  ecmOwned;
+  uint8_t  laserTier;
+  int8_t   standing[4];
+  uint8_t  lastSeenRank;
+  uint8_t  arcStage;
+  uint8_t  arcSide;
+  SaveQuestSlotV1 quest;
+  uint8_t  questStatus;
+  uint8_t  pirateSpawnPending;
+  uint8_t  currentSystem;
+  uint8_t  targetSystem;
+  uint8_t  landedPOI;
+  uint32_t marketEpoch;
+  // New in V2.
+  uint8_t  autolockOwned;
+};
+#pragma pack(pop)
+static_assert(sizeof(SaveDataV2) == 83, "V2 layout is frozen");
+static_assert(offsetof(SaveDataV2, autolockOwned) == sizeof(SaveDataV1),
+              "V2 must be V1 + appended fields");
+
+inline void upgradeV1toV2(const SaveDataV1& in, SaveDataV2& out) {
+  memset(&out, 0, sizeof out);
+  memcpy(&out, &in, sizeof in);
+  out.autolockOwned = 0;
+}
+
 // Alias always naming the CURRENT payload struct. Retarget when a new
 // version ships.
-using SaveData = SaveDataV1;
+using SaveData = SaveDataV2;
 static_assert(sizeof(SaveData) <= MaxPayload, "bump MaxPayload");
 
 // Exact payload size a given on-disk version must have; 0 = unknown
@@ -125,6 +168,7 @@ static_assert(sizeof(SaveData) <= MaxPayload, "bump MaxPayload");
 inline uint16_t frozenSizeFor(uint16_t ver) {
   switch (ver) {
     case 1:  return (uint16_t)sizeof(SaveDataV1);
+    case 2:  return (uint16_t)sizeof(SaveDataV2);
     default: return 0;
   }
 }
@@ -146,8 +190,11 @@ inline uint16_t frozenSizeFor(uint16_t ver) {
 // fields (append-only versions can prefix-memcpy; reordered versions
 // assign field by field).
 inline bool migrate(uint8_t* buf, uint16_t& ver, uint16_t& size) {
-  (void)buf;
-  // v1 is current — no upgrade steps yet.
+  if (ver == 1) {
+    SaveDataV1 v1;  memcpy(&v1, buf, sizeof v1);
+    SaveDataV2 v;   upgradeV1toV2(v1, v);
+    memcpy(buf, &v, sizeof v);  size = sizeof v;  ver = 2;
+  }
   return ver == CurrentVersion && size == sizeof(SaveData);
 }
 

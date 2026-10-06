@@ -61,6 +61,7 @@ device.
 | `R`                | Cycle missile lock |
 | `A`                | Fire missile at current lock |
 | `Q`                | Fire ECM burst (if installed) |
+| `F`                | Toggle autolock (if installed) · map zoom |
 | `Tab`              | Cycle target POI |
 | `H`                | Dock with nearby ship (trade / loot) |
 | `M`                | Open local system map |
@@ -141,7 +142,7 @@ drift into range and the screen hand-off fires itself.
 Pressing `Tab` cycles a target POI.
 
 Space has no walls. Each system's zone is a sphere 30K out from the
-star (the circle on the system map); fly past it and you are in deep
+star (the faint ring on the system map, zoom with `F`); fly past it and you are in deep
 space — target markers hide, the HUD shows your distance to the sun,
 and the radar marks the way home — until you fly back in.
 
@@ -154,6 +155,14 @@ and the radar marks the way home — until you fly back in.
   nearest target in front; `A` fires.
 - **ECM** is unlimited but cooldown-throttled, blanketing incoming
   missiles in a single burst.
+- **Autolock** (300 CR) steers the nose onto the current marker — a
+  ship from `Tab` / `R`, or a planet / gate from `Tab` or the map.
+  `F` toggles it; with nothing marked it grabs whatever is closest to
+  the nose. `AUTO` blinks in the footer while it turns and goes steady
+  green once on target. Holding pitch / yaw overrides it, roll stays
+  yours, and throttle is always manual. Routes that would cross the
+  sun's heat band curve around it. It drops when the target dies, on
+  landing / launch, and in deep space.
 - **Shields** absorb damage first and regenerate slowly (~37 s for a
   full top-up) **while still active** — once a shield is depleted to
   0 it stays down until you buy `REPAIR SHIELD` at the EQUIP shop.
@@ -219,6 +228,7 @@ Reached from the docked menu (`EQUIP`). All purchases debit
 | REPAIR SHIELD | 100 CR         | One-shot full recharge — required after depletion. |
 | MISSILE     | 30 CR each, cap 4 | Adds one homing missile. |
 | ECM SYSTEM  | 600 CR | Enables the ECM burst (one-time install). |
+| AUTOLOCK    | 300 CR | `F` steers the nose onto the marked ship / planet (one-time install). |
 | LARGE HOLD  | 400 CR | Cargo capacity 20 t → 35 t. |
 | BEAM LASER  | 1000 CR | Mid-tier laser. |
 | MIL LASER   | 6000 CR | Top-tier laser (requires Beam). |

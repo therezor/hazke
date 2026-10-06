@@ -83,19 +83,27 @@ inline void draw(M5Canvas& g, int currentIdx, const GameState& s) {
               :                  TFT_RED;
   MenuUI::drawStatRow(g, 102, "HULL", buf, hc);
 
-  // Equipment one-liner.
+  // Equipment one-liner. `add` clamps the write offset so a long loadout
+  // truncates instead of running `sizeof(eq) - p` past zero.
   {
-    char eq[24]; int p = 0;
-    if (s.missiles > 0)
-      p += snprintf(eq + p, sizeof(eq) - p, "M%d ", (int)s.missiles);
-    if (s.ecm)             p += snprintf(eq + p, sizeof(eq) - p, "ECM ");
-    if (s.cargoMax >= s.CargoMaxLarge)
-                           p += snprintf(eq + p, sizeof(eq) - p, "HOLD ");
-    if (s.laserTier == 1)  p += snprintf(eq + p, sizeof(eq) - p, "BEAM ");
-    if (s.laserTier >= 2)  p += snprintf(eq + p, sizeof(eq) - p, "MIL ");
-    if (Quest::isActive())
-      p += snprintf(eq + p, sizeof(eq) - p, "Q:%s",
-                    Quest::typeShort(Quest::active.type));
+    char eq[32]; int p = 0;
+    auto add = [&](const char* txt) {
+      if (p >= (int)sizeof(eq) - 1) return;
+      int n = snprintf(eq + p, sizeof(eq) - p, "%s", txt);
+      if (n > 0) p += n;
+      if (p > (int)sizeof(eq) - 1) p = (int)sizeof(eq) - 1;
+    };
+    if (s.missiles > 0) {
+      char m[6];
+      snprintf(m, sizeof(m), "M%d ", (int)s.missiles);
+      add(m);
+    }
+    if (s.ecm)             add("ECM ");
+    if (s.autolock)        add("AL ");
+    if (s.cargoMax >= s.CargoMaxLarge) add("HOLD ");
+    if (s.laserTier == 1)  add("BEAM ");
+    if (s.laserTier >= 2)  add("MIL ");
+    if (Quest::isActive()) { add("Q:"); add(Quest::typeShort(Quest::active.type)); }
     if (p == 0) strncpy(eq, "-", sizeof(eq));
     MenuUI::drawStatRow(g, 114, "GEAR", eq, TFT_LIGHTGREY);
   }

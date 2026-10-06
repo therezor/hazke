@@ -56,7 +56,7 @@ struct MenuInput {
   bool upE, downE, leftE, rightE;
   bool enterE, backE;
   bool chartE;
-  bool toggleE;   // 'f' — short/long range chart toggle (re-usable)
+  bool toggleE;   // 'f' — flight autolock / map zoom (re-usable)
   bool tabE;      // R12: cycle selected POI in SystemFlight
   bool hailE;     // R16: hail a nearby NPC trader ('h')
   bool lockE;     // R21: cycle missile lock onto next NPC in front ('r')

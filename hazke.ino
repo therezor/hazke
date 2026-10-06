@@ -12,6 +12,7 @@
 //   W                           fire laser
 //   R / A                       lock / fire missile
 //   Q                           ECM blast
+//   F                           autolock: steer onto the marker (module)
 //   M                           local system map (chart opens at the gate)
 //   CTRL+SPACE                   save a screenshot to the SD card
 //   ENTER                       confirm / select (menu)
@@ -123,6 +124,106 @@ static void stepSoundLevel(const MenuInput& mk) {
   }
 }
 
+// ---- USB serial console -------------------------------------------------
+//
+// Line-based dev console on the USB serial port (any baud), for testing
+// without grinding. Commands:
+//   status                 commander, credits, mode, save slot in use
+//   credits <CR>           set credits (whole CR)
+//   save [1-5] [sd|int]    write the commander to a slot — defaults to
+//                          the slot the save menu last loaded / saved
+
+static const char* const modeNames[] = {
+  "TITLE", "INFO", "ABOUT", "FLIGHT", "PAUSE", "MAP", "LANDED", "NPCTRADE",
+  "CHART", "SYSDATA", "MARKET", "WITCHSPACE", "EQUIP", "STATUS", "QUESTS",
+  "GAMEOVER", "SAVEMENU", "NAMEENTRY",
+};
+static_assert(sizeof(modeNames) / sizeof(modeNames[0]) ==
+              (size_t)GameMode::NameEntry + 1, "modeNames out of sync with GameMode");
+
+// True when `game` holds a live commander (not the title-screen leftovers).
+static bool commanderLoaded() {
+  switch (mode) {
+    case GameMode::Title: case GameMode::About:
+    case GameMode::NameEntry: case GameMode::GameOver:
+      return false;
+    case GameMode::Info:     return infoReturn     != GameMode::Title;
+    case GameMode::SaveMenu: return saveMenuReturn != GameMode::Title;
+    default:                 return true;
+  }
+}
+
+// Docked on a planet? Saves record it so a load comes up on the surface.
+static int consoleLandedPOI() {
+  switch (mode) {
+    case GameMode::Landed: case GameMode::Market: case GameMode::Equip:
+    case GameMode::Quests: case GameMode::Status:
+      return LandingScreen::planetPOIidx;
+    case GameMode::SaveMenu:
+      return saveMenuReturn == GameMode::Landed ? LandingScreen::planetPOIidx : -1;
+    default:
+      return -1;
+  }
+}
+
+static void runConsoleCommand(char* line) {
+  char* cmd = strtok(line, " \t");
+  if (!cmd) return;
+  SaveStore::Backend slotBackend = SaveMenuScreen::backend;
+  int slot = SaveMenuScreen::cursor;
+
+  if (strcmp(cmd, "status") == 0) {
+    Serial.printf("ok %s mode=%s credits=%d.%d sys=%s slot=%d/%s\n",
+                  commanderLoaded() ? game.commanderName : "-",
+                  modeNames[(int)mode], game.credits / 10, game.credits % 10,
+                  Galaxy::systems[currentSystem].name, slot + 1,
+                  SaveStore::backendName(slotBackend));
+  } else if (strcmp(cmd, "credits") == 0) {
+    char* arg = strtok(nullptr, " \t");
+    long cr = arg ? strtol(arg, nullptr, 10) : -1;
+    if (!commanderLoaded())             Serial.println("err no commander loaded");
+    else if (cr < 0 || cr > 100000000L) Serial.println("err usage: credits <CR>");
+    else {
+      game.credits = (int)(cr * 10);
+      Audio::cash();
+      Serial.printf("ok credits=%ld.0\n", cr);
+    }
+  } else if (strcmp(cmd, "save") == 0) {
+    for (char* arg; (arg = strtok(nullptr, " \t")) != nullptr;) {
+      if      (strcmp(arg, "sd")  == 0) slotBackend = SaveStore::Backend::SDCard;
+      else if (strcmp(arg, "int") == 0) slotBackend = SaveStore::Backend::Internal;
+      else if (arg[0] >= '1' && arg[0] < '1' + SaveStore::NumSlots && !arg[1])
+        slot = arg[0] - '1';
+      else { Serial.println("err usage: save [1-5] [sd|int]"); return; }
+    }
+    if (!commanderLoaded()) { Serial.println("err no commander loaded"); return; }
+    SaveFormat::SaveData d;
+    SaveGame::capture(d, game, currentSystem, targetSystem, consoleLandedPOI());
+    bool ok = SaveStore::writeSlot(slotBackend, slot, d);
+    if (ok) Audio::missionAccept(); else Audio::deny();
+    Serial.printf("%s save slot=%d/%s\n", ok ? "ok" : "err", slot + 1,
+                  SaveStore::backendName(slotBackend));
+  } else {
+    Serial.println("err commands: status | credits <CR> | save [1-5] [sd|int]");
+  }
+}
+
+static void pollSerialConsole() {
+  static char line[48];
+  static int  len = 0;
+  while (Serial.available() > 0) {
+    int c = Serial.read();
+    if (c == '\r' || c == '\n') {
+      if (len == 0) continue;
+      line[len] = '\0';
+      len = 0;
+      runConsoleCommand(line);
+    } else if (len < (int)sizeof(line) - 1) {
+      line[len++] = (char)c;
+    }
+  }
+}
+
 // Hand the finished frame to the display. pushSprite already streams a
 // DMA-capable sprite by DMA; what used to make it block was releasing
 // the bus afterwards, which waits for the transfer. With the bus held
@@ -171,7 +272,14 @@ namespace Prof {
 
 void setup() {
   auto cfg = M5.config();
+  // M5Unified only starts Serial when a baud rate is set; the USB serial
+  // console and the boot logs below both need it.
+  cfg.serial_baudrate = 115200;
   M5Cardputer.begin(cfg, true);
+#if ARDUINO_USB_MODE && ARDUINO_USB_CDC_ON_BOOT
+  // Never block the game on USB: with no host reading, output is dropped.
+  Serial.setTxTimeoutMs(0);
+#endif
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Display.setBrightness(180);
   M5Cardputer.Display.fillScreen(TFT_BLACK);
@@ -293,6 +401,7 @@ void loop() {
   modePhase += dt;
 
   MenuInput mk = pollMenuInput();
+  pollSerialConsole();
 
   // Global screenshot hotkey: Ctrl+Space writes the current frame to SD.
   // Edge-detected so a held combo snaps exactly one shot.
@@ -438,6 +547,10 @@ void loop() {
         // Tab always picks the next target, even mid-warp (so you can
         // re-aim without dropping out).
         SystemFlight::cycleTarget();
+      }
+      // F: AUTOLOCK module — steer the nose onto the marked ship / POI.
+      if (mk.toggleE && !SystemFlight::state.warping) {
+        SystemFlight::toggleAutolock(game);
       }
       // Auto-land: as soon as the player drifts inside LandingRange of any
       // planet (and isn't warping past it), drop straight into the landing
@@ -608,6 +721,7 @@ void loop() {
       if (mk.upE || mk.leftE)   MapScreen::moveSelection(-1);
       if (mk.downE || mk.rightE) MapScreen::moveSelection(+1);
       if (mk.enterE) MapScreen::markSelected();
+      if (mk.toggleE) { MapScreen::cycleZoom(); Audio::uiMove(); }
       // 'M' is the open key from flight — pressing it again closes the map
       // the same way ESC would, so it acts as a toggle.
       if (mk.backE || mk.mapE) {

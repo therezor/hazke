@@ -10,7 +10,7 @@ namespace Config {
   // changes, together with a new frozen SaveDataVn struct and an
   // upgradeVn-1toVn transformer in SaveFormat.h — never edit a released
   // payload struct in place.
-  constexpr uint16_t SaveFormatVersion = 1;
+  constexpr uint16_t SaveFormatVersion = 2;
 
   constexpr int ScreenW = 240;
   constexpr int ScreenH = 135;
