@@ -20,7 +20,7 @@ struct MenuItem { const char* label; };
 inline const MenuItem items[] = {
   {"NEW GAME"},
   {"LOAD GAME"},
-  {"SOUND"},      // label resolved at draw time from Audio::muted
+  {"SOUND"},      // label resolved at draw time from Audio::level
   {"CONTROLS"},
   {"ABOUT"},
 };
@@ -46,7 +46,7 @@ inline void draw(M5Canvas& g, float phaseSec, int selected) {
   const int itemH  = 13;
   for (int i = 0; i < N; i++) {
     const char* label = items[i].label;
-    if (i == ItemSound) label = Audio::muted ? "SOUND: OFF" : "SOUND: ON";
+    if (i == ItemSound) label = Audio::soundLabel(i == selected);
     MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phaseSec, /*destructive=*/false,
                             MenuUI::DisabledColor, /*textSize=*/1);

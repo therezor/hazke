@@ -191,9 +191,11 @@ inline bool tryPlayerFire(GameState& g,
 }
 
 // --- NPC → Player fire ----------------------------------------------------
-// Shield absorbs first; anything past it spills onto the hull.
+// Shield absorbs first; anything past it spills onto the hull. Used by
+// both laser and missile impacts.
 inline void damagePlayer(GameState& g, float amount) {
-  if (g.shield > 0.0f) {
+  bool shielded = g.shield > 0.0f;
+  if (shielded) {
     g.shield -= amount;
     if (g.shield < 0.0f) {
       // Excess spills past the shield onto the hull.
@@ -204,8 +206,10 @@ inline void damagePlayer(GameState& g, float amount) {
     g.hull -= amount;
   }
   if (g.hull < 0.0f) g.hull = 0.0f;
-  // Crunch on the hit channel — covers both laser and missile impacts.
-  Audio::playerHit();
+  // Fizz while the shield soaks it, metal crunch once it's the hull —
+  // plus a power-down sweep on the hit that collapses the shield.
+  if (shielded) Audio::shieldHit(); else Audio::hullHit();
+  if (shielded && g.shield <= 0.0f) Audio::shieldDown();
   playerHitFlash = PlayerHitFlashTime;
 }
 
@@ -214,7 +218,7 @@ inline void damagePlayer(GameState& g, float amount) {
 inline void damagePlayerHull(GameState& g, float amount) {
   g.hull -= amount;
   if (g.hull < 0.0f) g.hull = 0.0f;
-  Audio::playerHit();
+  Audio::hullHit();
   playerHitFlash = PlayerHitFlashTime;
 }
 

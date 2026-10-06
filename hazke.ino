@@ -32,6 +32,7 @@
 #include "Galaxy.h"
 #include "SolarSystem.h"
 #include "SystemFlight.h"
+#include "Sky.h"
 #include "ChartScreen.h"
 #include "SystemDataScreen.h"
 #include "Market.h"
@@ -58,8 +59,17 @@
 #include "SaveStore.h"
 #include "SaveMenuScreen.h"
 #include "NameEntryScreen.h"
+#include <esp_heap_caps.h>
 
-static M5Canvas canvas(&M5Cardputer.Display);
+// Two frame buffers: while DMA streams the finished frame to the panel,
+// the next one is drawn into the other buffer, so the ~13 ms SPI push
+// no longer stalls the game loop. If the heap can't spare the second
+// buffer, the game falls back to one buffer pushed synchronously.
+static M5Canvas canvasA(&M5Cardputer.Display);
+static M5Canvas canvasB(&M5Cardputer.Display);
+static M5Canvas* drawBuf = &canvasA;
+static bool doubleBuffered = false;
+
 static GameState game;
 static Starfield stars;
 static InputState input;
@@ -87,8 +97,77 @@ static bool tryStartJump() {
   if (!Hyperspace::canJump(game, currentSystem, targetSystem)) return false;
   mode = GameMode::Witchspace;
   modePhase = 0.0f;
+  Audio::warpWhoosh();
   return true;
 }
+
+// Menu feedback: tick on cursor moves, click on confirm, blip on back.
+// `lr` marks screens where LEFT/RIGHT also move the cursor. Outcome
+// sounds (cash, deny) played by a handler afterwards replace the click
+// on the shared UI channel.
+static void menuSfx(const MenuInput& mk, bool lr = false) {
+  if (mk.upE || mk.downE || (lr && (mk.leftE || mk.rightE))) Audio::uiMove();
+  if (mk.enterE) Audio::uiSelect();
+  if (mk.backE)  Audio::uiBack();
+}
+
+// SOUND row in the title / pause menus: LEFT / RIGHT step the level
+// down / up (ENTER still cycles it). The accept chime previews the new
+// level; a buzz says it's already at that end.
+static void stepSoundLevel(const MenuInput& mk) {
+  if (!mk.leftE && !mk.rightE) return;
+  if (Audio::stepLevel(mk.rightE ? +1 : -1)) {
+    if (!Audio::muted()) Audio::missionAccept();
+  } else {
+    Audio::deny();
+  }
+}
+
+// Hand the finished frame to the display. pushSprite already streams a
+// DMA-capable sprite by DMA; what used to make it block was releasing
+// the bus afterwards, which waits for the transfer. With the bus held
+// (see setup) it returns at once, so: wait for the previous transfer,
+// start this one, and draw the next frame into the other buffer.
+static void present(M5Canvas& c) {
+  if (doubleBuffered) M5Cardputer.Display.waitDMA();
+  c.pushSprite(0, 0);
+  if (doubleBuffered) drawBuf = (drawBuf == &canvasA) ? &canvasB : &canvasA;
+}
+
+#if HAZKE_PROFILE
+// Frame-time profiler: per-phase averages, FPS and heap every 2 s.
+namespace Prof {
+  constexpr int Phases = 4;   // logic, world, hud, present
+  inline uint32_t acc[Phases] = {0};
+  inline uint32_t t = 0, frames = 0, windowStart = 0;
+  inline void begin() { t = micros(); }
+  inline void mark(int phase) { uint32_t now = micros(); acc[phase] += now - t; t = now; }
+  inline void endFrame() {
+    frames++;
+    uint32_t now = millis();
+    if (windowStart == 0) windowStart = now;
+    if (now - windowStart < 2000u) return;
+    float n = (float)frames;
+    Serial.printf("[prof] %.1f fps | logic %.2f world %.2f hud %.2f present %.2f ms"
+                  " | heap %u dma-block %u\n",
+                  n * 1000.0f / (float)(now - windowStart),
+                  acc[0] / n / 1000.0f, acc[1] / n / 1000.0f,
+                  acc[2] / n / 1000.0f, acc[3] / n / 1000.0f,
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    for (auto& a : acc) a = 0;
+    frames = 0;
+    windowStart = now;
+  }
+}
+#define PROF_BEGIN()  Prof::begin()
+#define PROF_MARK(p)  Prof::mark(p)
+#define PROF_END()    Prof::endFrame()
+#else
+#define PROF_BEGIN()
+#define PROF_MARK(p)
+#define PROF_END()
+#endif
 
 void setup() {
   auto cfg = M5.config();
@@ -97,8 +176,13 @@ void setup() {
   M5Cardputer.Display.setBrightness(180);
   M5Cardputer.Display.fillScreen(TFT_BLACK);
 
-  canvas.setColorDepth(16);
-  canvas.createSprite(Config::ScreenW, Config::ScreenH);
+  // Frame buffers first, while the heap is still one big free block —
+  // each needs 64.8 KB of contiguous DMA-capable RAM.
+  canvasA.setColorDepth(16);
+  canvasA.createSprite(Config::ScreenW, Config::ScreenH);
+  canvasB.setColorDepth(16);
+  bool haveB = HAZKE_DOUBLE_BUFFER &&
+               canvasB.createSprite(Config::ScreenW, Config::ScreenH) != nullptr;
 
   stars.init();
   game.reset();
@@ -108,10 +192,29 @@ void setup() {
   Galaxy::generate();
   Galaxy::dumpToSerial();
 
-  // R28: bring up the PWM beeper. Sequential tone() calls queue into
-  // the speaker's sample buffer, so SFX play in the background without
-  // a per-frame tick.
-  Audio::begin();
+  // Speaker + SFX arena (synthesized now, played back by the speaker
+  // task). Sound outranks the second frame buffer: if the arena doesn't
+  // fit, give the buffer back and retry.
+  bool audioOk = Audio::begin();
+  if (!audioOk && haveB) {
+    canvasB.deleteSprite();
+    haveB = false;
+    audioOk = Audio::build();
+  }
+  // Keep headroom for the SD / LittleFS mounts the save menu does later.
+  if (haveB && ESP.getFreeHeap() < Config::HeapReserve) {
+    canvasB.deleteSprite();
+    haveB = false;
+  }
+  doubleBuffered = haveB;
+  // Hold the display bus for the whole run: releasing it waits for the
+  // in-flight DMA, which would make every push synchronous again. The SD
+  // card sits on a separate SPI host, so nothing else needs this bus.
+  if (doubleBuffered) M5Cardputer.Display.startWrite();
+  Serial.printf("[boot] double buffer %s, audio %s, free heap %u, largest DMA block %u\n",
+                doubleBuffered ? "on" : "OFF", audioOk ? "ok" : "FAILED",
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
 
   // R10: dump the gate adjacency graph and the starting system's POI table
   // to Serial so we can eyeball the procgen output until R11 renders it.
@@ -160,10 +263,10 @@ static void selectMenuItem() {
       modePhase = 0.0f;
       break;
     case TitleScreen::ItemSound:
-      // Toggle stays on the title screen; the accept chime doubles as
-      // an audible "sound is now on" confirmation.
-      Audio::toggleMute();
-      if (!Audio::muted) Audio::missionAccept();
+      // Steps OFF/LOW/MED/HIGH in place; the accept chime previews the
+      // new level.
+      Audio::cycleLevel();
+      if (!Audio::muted()) Audio::missionAccept();
       break;
     case TitleScreen::ItemControls:
       infoReturn = GameMode::Title;
@@ -182,6 +285,8 @@ void loop() {
   M5Cardputer.update();
 
   uint32_t frameStart = micros();
+  PROF_BEGIN();
+  M5Canvas& canvas = *drawBuf;
   float dt = (frameStart - lastFrameMicros) / 1e6f;
   lastFrameMicros = frameStart;
   if (dt > 0.1f) dt = 0.1f;
@@ -203,6 +308,8 @@ void loop() {
 
   switch (mode) {
     case GameMode::Title: {
+      menuSfx(mk);
+      if (menuSelected == TitleScreen::ItemSound) stepSoundLevel(mk);
       if (mk.upE) {
         menuSelected = (menuSelected - 1 + TitleScreen::N) % TitleScreen::N;
       } else if (mk.downE) {
@@ -220,6 +327,7 @@ void loop() {
       // Small guard so the press that opened the screen doesn't
       // immediately close it.
       if (modePhase > 0.25f && (mk.any || mk.enterE)) {
+        Audio::uiBack();
         mode = infoReturn;
         modePhase = 0.0f;
       }
@@ -229,6 +337,7 @@ void loop() {
     case GameMode::About: {
       AboutScreen::draw(canvas);
       if (modePhase > 0.25f && (mk.any || mk.enterE)) {
+        Audio::uiBack();
         mode = GameMode::Title;
         modePhase = 0.0f;
       }
@@ -303,24 +412,23 @@ void loop() {
         SystemFlight::validateLock();
       }
 
+      PROF_MARK(0);
       canvas.fillSprite(TFT_BLACK);
-      // During warp, override starfield throttle so the stars streak hard
-      // and zero out rotation rates so they fly straight in.
-      if (SystemFlight::state.warping) {
-        stars.update(SystemFlight::WarpStarSpeed, 0.0f, 0.0f, 0.0f, dt);
-      } else {
-        stars.update(game.speed, game.pitchRate, game.yawRate, game.rollRate, dt);
-      }
+      // The sky is drawn through the same camera as the planets, so it
+      // turns with them and only streams past when the ship really moves.
+      Sky::update();
       // Clip world rendering to the viewport so planet disks and asteroid
       // dots never bleed into the HUD strip or footer.
       canvas.setClipRect(Config::ViewX, Config::ViewY, Config::ViewW, Config::ViewH);
-      stars.draw(canvas);
+      Sky::draw(canvas);
       SystemFlight::renderWorld(canvas);
       canvas.clearClipRect();
+      PROF_MARK(1);
 
       Cockpit::draw(canvas, game);
       SystemFlight::renderHUD(canvas, game, dist);
       SystemFlight::renderRadarBlips(canvas);
+      PROF_MARK(2);
 
       // --- input ---
       // While dying the ship doesn't accept any commands — let the
@@ -341,6 +449,9 @@ void loop() {
           // R30: quest hook — delivery targets and home-planet turn-ins
           // resolve on landing. Includes the planet POI so home is
           // matched per-planet, not just per-system.
+          // Chime first: a quest turn-in fanfare from onDock shares the
+          // event channel and should win.
+          Audio::dockChime();
           Quest::onDock(game, currentSystem, p);
           LandingScreen::enter(currentSystem, p);
           mode = GameMode::Landed;
@@ -352,6 +463,7 @@ void loop() {
       // chart so the player can pick a destination. Inter-system travel
       // happens nowhere else.
       if (!SystemFlight::state.warping && SystemFlight::gateContact()) {
+        Audio::uiSelect();
         SystemFlight::cancelWarp();
         chartReturn = GameMode::SystemFlight;
         mode = GameMode::Chart;
@@ -363,6 +475,7 @@ void loop() {
                                    SystemFlight::state.py,
                                    SystemFlight::state.pz);
         if (npc >= 0) {
+          Audio::uiSelect();
           SystemFlight::cancelWarp();
           NPCTradeScreen::enter(currentSystem, npc,
                                 NPCShip::ships[npc].hailSeed);
@@ -377,17 +490,18 @@ void loop() {
         SystemFlight::cycleLock();
       }
       if (mk.missileE && !SystemFlight::state.warping && game.hull >= 0.25f) {
+        bool fired = false;
         if (game.missiles > 0 && SystemFlight::state.lockedNPC >= 0) {
-          if (Missile::spawnPlayer(SystemFlight::state.px,
-                                   SystemFlight::state.py,
-                                   SystemFlight::state.pz,
-                                   SystemFlight::state.fx,
-                                   SystemFlight::state.fy,
-                                   SystemFlight::state.fz,
-                                   SystemFlight::state.lockedNPC)) {
-            game.missiles--;
-          }
+          fired = Missile::spawnPlayer(SystemFlight::state.px,
+                                       SystemFlight::state.py,
+                                       SystemFlight::state.pz,
+                                       SystemFlight::state.fx,
+                                       SystemFlight::state.fy,
+                                       SystemFlight::state.fz,
+                                       SystemFlight::state.lockedNPC);
+          if (fired) game.missiles--;
         }
+        if (!fired) Audio::lockFail();   // no lock / empty rack
       }
       if (mk.ecmE && !SystemFlight::state.warping) {
         if (game.ecm && game.ecmCooldown <= 0.0f) {
@@ -395,9 +509,12 @@ void loop() {
                               SystemFlight::state.py,
                               SystemFlight::state.pz);
           game.ecmCooldown = Missile::ECMCooldown;
+        } else {
+          Audio::deny();
         }
       }
       if (mk.mapE) {
+        Audio::uiSelect();
         mapReturn = GameMode::SystemFlight;
         MapScreen::enter(currentSystem);
         mode = GameMode::Map;
@@ -405,6 +522,7 @@ void loop() {
         break;
       }
       if (mk.backE) {
+        Audio::uiBack();
         PauseMenu::open();
         mode = GameMode::Pause;
         modePhase = 0.0f;
@@ -418,6 +536,7 @@ void loop() {
       GameOverScreen::draw(canvas, currentSystem, game);
       // ENTER restarts the run; ESC also bounces to title.
       if (mk.enterE || mk.backE) {
+        Audio::uiSelect();
         newCommander();
         mode = GameMode::Title;
         modePhase = 0.0f;
@@ -427,6 +546,8 @@ void loop() {
 
     case GameMode::Pause: {
       PauseMenu::tick(dt);
+      menuSfx(mk);
+      if (PauseMenu::selected == PauseMenu::ItemSound) stepSoundLevel(mk);
       if (mk.upE)   PauseMenu::moveUp();
       if (mk.downE) PauseMenu::moveDown();
       // ESC always resumes — quick way out without scrolling.
@@ -448,10 +569,10 @@ void loop() {
             modePhase = 0.0f;
             break;
           case PauseMenu::ItemSound:
-            // Toggle stays in the pause menu; the accept chime doubles
-            // as an audible "sound is now on" confirmation.
-            Audio::toggleMute();
-            if (!Audio::muted) Audio::missionAccept();
+            // Steps OFF/LOW/MED/HIGH in place; the accept chime previews
+            // the new level.
+            Audio::cycleLevel();
+            if (!Audio::muted()) Audio::missionAccept();
             break;
           case PauseMenu::ItemControls:
             infoReturn = GameMode::Pause;
@@ -468,7 +589,10 @@ void loop() {
       // Draw the cockpit/world behind the menu first so the dim
       // overlay reads as a halt rather than a black screen.
       canvas.fillSprite(TFT_BLACK);
+      canvas.setClipRect(Config::ViewX, Config::ViewY, Config::ViewW, Config::ViewH);
+      Sky::draw(canvas);
       SystemFlight::renderWorld(canvas);
+      canvas.clearClipRect();
       Cockpit::draw(canvas, game);
       PauseMenu::draw(canvas, modePhase);
       break;
@@ -476,6 +600,8 @@ void loop() {
 
     case GameMode::Map: {
       MapScreen::tick(dt);
+      menuSfx(mk, /*lr=*/true);
+      if (mk.mapE) Audio::uiBack();
       // Arrows all step through the selectable list — vertical and
       // horizontal both work so the player can grab whichever they're
       // pressing.
@@ -494,6 +620,7 @@ void loop() {
     }
 
     case GameMode::Chart: {
+      menuSfx(mk, /*lr=*/true);
       if (mk.upE)    targetSystem = ChartScreen::nearestInDirection(targetSystem, 0);
       if (mk.downE)  targetSystem = ChartScreen::nearestInDirection(targetSystem, 1);
       if (mk.leftE)  targetSystem = ChartScreen::nearestInDirection(targetSystem, 2);
@@ -528,16 +655,21 @@ void loop() {
     case GameMode::SystemData: {
       SystemDataScreen::draw(canvas, currentSystem, targetSystem, game);
       if (mk.backE || mk.chartE) {
+        Audio::uiBack();
         mode = GameMode::Chart;
         modePhase = 0.0f;
       } else if (mk.enterE) {
-        tryStartJump();
+        if (!tryStartJump()) Audio::deny();
       }
       break;
     }
 
     case GameMode::Market: {
-      MarketScreen::handleInput(mk, currentSystem, game);
+      menuSfx(mk);
+      bool traded = MarketScreen::handleInput(mk, currentSystem, game);
+      if (mk.leftE || mk.rightE) {
+        if (traded) Audio::cash(); else Audio::deny();
+      }
       MarketScreen::draw(canvas, currentSystem, game);
       if (mk.backE) {
         mode = marketReturn;
@@ -549,6 +681,7 @@ void loop() {
     case GameMode::Status: {
       StatusScreen::draw(canvas, currentSystem, game);
       if (mk.backE || mk.enterE) {
+        Audio::uiBack();
         mode = GameMode::Landed;
         modePhase = 0.0f;
       }
@@ -557,9 +690,12 @@ void loop() {
 
     case GameMode::Equip: {
       EquipScreen::tick(dt);
+      menuSfx(mk);
       if (mk.upE)    EquipScreen::moveUp();
       if (mk.downE)  EquipScreen::moveDown();
-      if (mk.enterE) EquipScreen::tryBuy(game);
+      if (mk.enterE) {
+        if (EquipScreen::tryBuy(game)) Audio::cash(); else Audio::deny();
+      }
       if (mk.backE) {
         mode = GameMode::Landed;
         modePhase = 0.0f;
@@ -571,6 +707,7 @@ void loop() {
 
     case GameMode::Quests: {
       QuestScreen::tick(dt);
+      menuSfx(mk);
       if (mk.upE)    QuestScreen::moveUp();
       if (mk.downE)  QuestScreen::moveDown();
       if (mk.enterE) QuestScreen::tryEnter(game);
@@ -589,10 +726,15 @@ void loop() {
 
     case GameMode::NPCTrade: {
       NPCTradeScreen::tick(dt);
+      menuSfx(mk);
       if (mk.upE)    NPCTradeScreen::moveUp();
       if (mk.downE)  NPCTradeScreen::moveDown();
-      if (mk.rightE) NPCTradeScreen::tryBuy(game);
-      if (mk.leftE)  NPCTradeScreen::trySell(game);
+      if (mk.rightE) {
+        if (NPCTradeScreen::tryBuy(game)) Audio::cash(); else Audio::deny();
+      }
+      if (mk.leftE) {
+        if (NPCTradeScreen::trySell(game)) Audio::cash(); else Audio::deny();
+      }
       if (mk.backE) {
         mode = GameMode::SystemFlight;
         modePhase = 0.0f;
@@ -609,11 +751,15 @@ void loop() {
       // all normal Landed input (move/select/launch) until the player
       // acknowledges it with ENTER or ESC.
       if (Quest::completionPending) {
-        if (mk.enterE || mk.backE) Quest::dismissCompletion();
+        if (mk.enterE || mk.backE) {
+          Audio::uiSelect();
+          Quest::dismissCompletion();
+        }
         LandingScreen::draw(canvas, game, modePhase);
         break;
       }
 
+      menuSfx(mk);
       if (mk.upE)   LandingScreen::moveUp();
       if (mk.downE) LandingScreen::moveDown();
 
@@ -673,6 +819,7 @@ void loop() {
         }
         SystemFlight::enterNearPOI(currentSystem,
                                    LandingScreen::planetPOIidx, standoff);
+        Audio::launchRoar();
         // R30: a freshly-accepted Patrol quest fires a ONE-SHOT spawn of
         // its full pirate quota — killed pirates stay dead, so the
         // player has a fixed roster to hunt for this contract.
@@ -699,7 +846,9 @@ void loop() {
 
     case GameMode::NameEntry: {
       NameEntryScreen::handleTyping();
+      if (mk.enterE) Audio::uiSelect();
       if (mk.backE) {
+        Audio::uiBack();
         mode = GameMode::Title;
         modePhase = 0.0f;
         break;
@@ -720,6 +869,7 @@ void loop() {
 
     case GameMode::SaveMenu: {
       SaveMenuScreen::tick(dt);
+      menuSfx(mk, /*lr=*/true);
       int landedPOI = -1;
       auto r = SaveMenuScreen::handleInput(mk, game, currentSystem,
                                            targetSystem, landedPOI);
@@ -764,6 +914,7 @@ void loop() {
         // R30: recon quests flip to ReadyToTurnIn if their target was
         // this system. Done before SystemFlight::enter so any state
         // update is visible in HUD / Pause overlay immediately.
+        Audio::warpArrive();
         Quest::onHyperspaceArrive(game, currentSystem);
         SystemFlight::enter(currentSystem, SystemFlight::SpawnAt::AtGate);
         mode = GameMode::SystemFlight;
@@ -773,13 +924,34 @@ void loop() {
     }
   }
 
+  // Electric drive whine: pitch follows the throttle in flight, spools up
+  // through the hyperspace tunnel, silent everywhere else.
+  if (mode == GameMode::SystemFlight && !SystemFlight::state.dying) {
+    float thr = game.speed;
+    Audio::engine(thr > 0.003f ? 0.35f + 0.65f * thr : 0.0f, thr);
+  } else if (mode == GameMode::Witchspace) {
+    Audio::engine(1.0f, modePhase / WitchspaceScreen::Duration);
+  } else {
+    Audio::engine(0.0f, 0.0f);
+  }
+
   // Screenshot: snap the finished frame, then overlay the toast so the
   // confirmation banner is never baked into the saved image.
   if (shotEdge) Screenshot::capture(canvas);
   Screenshot::drawToast(canvas);
 
-  canvas.pushSprite(0, 0);
+  PROF_MARK(0);
+  present(canvas);
+  PROF_MARK(3);
+  PROF_END();
 
+  // Frame cap. Sleep for the whole milliseconds left (yielding the CPU
+  // to the speaker task instead of busy-waiting), then spin out the
+  // remainder for an even cadence.
   uint32_t elapsed = micros() - frameStart;
-  if (elapsed < Config::FrameUs) delayMicroseconds(Config::FrameUs - elapsed);
+  if (elapsed < Config::FrameUs) {
+    uint32_t remainMs = (Config::FrameUs - elapsed) / 1000u;
+    if (remainMs > 1) delay(remainMs - 1);
+    while (micros() - frameStart < Config::FrameUs) {}
+  }
 }

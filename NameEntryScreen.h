@@ -63,11 +63,13 @@ inline void handleTyping() {
       if (len >= MaxLen)   { Audio::deny(); continue; }
       buf[len++] = f;
       buf[len]   = '\0';
+      Audio::uiMove();
     }
   }
 
   if (del && !prevDel && len > 0) {
     buf[--len] = '\0';
+    Audio::uiBack();
   }
 
   memcpy(prevDown, down, sizeof prevDown);

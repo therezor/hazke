@@ -43,7 +43,6 @@ constexpr float FocalLen       = 110.0f;  // perspective focal length for the co
 constexpr float WarpSpeed      = 7000.0f; // sysu/sec — ~5.7× throttle max
 constexpr float WarpDropRange  = 3000.0f; // sysu — drop out when this close
 constexpr float WarpMinRange   = 1000.0f; // sysu — refuse to engage if closer
-constexpr float WarpStarSpeed  = 4.0f;    // throttle equiv. for streaking stars
 
 // R13 planet landing.
 // Visual body sizes. The icosphere world radius for planets and the sun
@@ -108,16 +107,25 @@ struct Kin {
   bool  dying;        // set when hull hits 0 (collisions / lasers / sun)
   float deathTimer;   // seconds remaining in death animation
   bool  deathFinished;// set when timer expires; outer loop transitions to GameOver
+  bool  outOfZone;    // past SolarSystem::ZoneRadius — deep space, markers hidden
+  float zoneToast;    // seconds left on the LEAVING / ENTERING banner
 };
 
 constexpr float DeathAnimTime = 2.2f;   // seconds
+
+// Open-world zone. Flight is unbounded; ZoneRadius (SolarSystem.h) only
+// decides when the system has dropped behind. Re-entry needs the player
+// ZoneHysteresis back inside so the state can't flicker on the edge.
+constexpr float ZoneHysteresis = 1000.0f;  // sysu
+constexpr float ZoneToastTime  = 2.0f;     // s
 
 inline Kin state = {
   0, 0, 0,         // position
   0.0f, 0.0f, 1.0f, // forward = +Z
   0.0f, 1.0f, 0.0f, // up = +Y
   false, -1, 0, false, -1,
-  false, 0.0f, false
+  false, 0.0f, false,
+  false, 0.0f
 };
 
 // Re-orthonormalize the camera basis. Tiny drift accumulates each frame;
@@ -148,7 +156,7 @@ inline Rock rocks[NumRocks];
 inline int  activeBelt = -1;
 
 // Forward decls — belt helpers live further down so they can call
-// toCamera, but `update()` above needs to call updateBelt(). The
+// project(), but `update()` above needs to call updateBelt(). The
 // landing/gate probes are also defined later but called from renderHUD.
 inline void updateBelt();
 inline bool inBelt();
@@ -157,16 +165,41 @@ inline int  gateInRange();
 inline bool nearGate();
 inline SolarSystem::Layout layout;   // cached for the loaded system
 
-// R26 sun-heat helpers. The star is the Star POI sitting at the origin;
-// we cache its radius once after layoutFor for cheap proximity checks.
-inline float starRadius() {
+// Per-layout derived data, rebuilt by loadLayout() whenever the layout
+// changes so render passes don't recompute it every frame.
+constexpr int HaloDots = 40;
+inline float   starR = 0.0f;                          // star POI radius
+inline int16_t haloU[SolarSystem::MaxPOIs][HaloDots]; // belt-halo dot offsets
+inline int16_t haloV[SolarSystem::MaxPOIs][HaloDots]; // in the ring plane
+
+inline void loadLayout(int sysIdx) {
+  SolarSystem::layoutFor(sysIdx, layout);
+  state.loadedSys = sysIdx;
+  starR = 0.0f;
   for (int i = 0; i < layout.numPOIs; i++) {
-    if (layout.poi[i].type == SolarSystem::POIType::Star) {
-      return (float)layout.poi[i].radius;
+    const auto& p = layout.poi[i];
+    if (p.type == SolarSystem::POIType::Star) starR = (float)p.radius;
+    if (p.type != SolarSystem::POIType::Planet ||
+        (p.flags & SolarSystem::PoiFlagBelt) == 0) continue;
+    // Deterministic dots scattered across the belt band, seeded by the
+    // POI index so the halo looks the same on every visit.
+    float innerR = (float)p.radius + 600.0f;
+    float outerR = (float)p.radius + 2400.0f;
+    uint32_t s = ((uint32_t)i * 0x9E3779B1u) | 1u;
+    for (int d = 0; d < HaloDots; d++) {
+      s = s * 1664525u + 1013904223u;
+      float ang = (float)(s & 0xFFFFu) * (6.2831853f / 65536.0f);
+      s = s * 1664525u + 1013904223u;
+      float t = (float)(s & 0xFFFFu) / 65536.0f;
+      float r = innerR + t * (outerR - innerR);
+      haloU[i][d] = (int16_t)(cosf(ang) * r);
+      haloV[i][d] = (int16_t)(sinf(ang) * r);
     }
   }
-  return 0.0f;
 }
+
+// R26 sun-heat helper: radius of the star at the origin, cached above.
+inline float starRadius() { return starR; }
 
 // Returns the player's "proximity factor" to the star, 0..1.
 //   0 -> outside the heat buffer entirely (no warming)
@@ -191,8 +224,7 @@ inline float sunProximity() {
 enum class SpawnAt : uint8_t { AtGate };
 
 inline void enter(int sysIdx, SpawnAt /*where*/) {
-  SolarSystem::layoutFor(sysIdx, layout);
-  state.loadedSys = sysIdx;
+  loadLayout(sysIdx);
   activeBelt = -1;   // invalidate belt cache on system switch / respawn
   NPCShip::spawnFor(sysIdx, layout);
   Combat::resetFlashes();
@@ -202,6 +234,8 @@ inline void enter(int sysIdx, SpawnAt /*where*/) {
   state.dying          = false;
   state.deathFinished  = false;
   state.deathTimer     = 0.0f;
+  state.outOfZone      = false;
+  state.zoneToast      = 0.0f;
 
   int gateI = -1;
   for (int i = 0; i < layout.numPOIs; i++) {
@@ -275,12 +309,14 @@ inline void cycleTarget() {
       if (layout.poi[v].type == SolarSystem::POIType::Star) continue;
       state.targetIdx = v;
       state.lockedNPC = -1;
+      Audio::uiMove();
       return;
     }
     int s = v - layout.numPOIs;
     if (!NPCShip::ships[s].active) continue;
     state.lockedNPC = s;
     state.targetIdx = -1;
+    Audio::lockOn();
     return;
   }
 }
@@ -309,10 +345,12 @@ inline void cycleLock() {
     // Marker is exclusive — drop the POI target so the cockpit shows
     // one bracket, not two.
     state.targetIdx = -1;
+    Audio::lockOn();
     return;
   }
   // No candidate — clear the lock so the HUD reflects it.
   state.lockedNPC = -1;
+  Audio::lockFail();
 }
 
 // R21: drop the lock if the locked NPC dies / is recycled.
@@ -453,15 +491,24 @@ inline void update(GameState& g, float dt) {
   state.py += state.fy * v * dt;
   state.pz += state.fz * v * dt;
 
-  // Soft clamp inside the system cube so you can't fly forever — bouncing
-  // back from the wall feels wrong; for now we just stop you crossing it.
-  const float half = (float)SolarSystem::SystemHalfExtent;
-  if (state.px >  half) state.px =  half;
-  if (state.px < -half) state.px = -half;
-  if (state.py >  half) state.py =  half;
-  if (state.py < -half) state.py = -half;
-  if (state.pz >  half) state.pz =  half;
-  if (state.pz < -half) state.pz = -half;
+  // No walls — space is open in every direction. Past ZoneRadius the
+  // system drops behind: target markers hide (the radar points home)
+  // until the player flies back in.
+  {
+    float r2 = state.px * state.px + state.py * state.py + state.pz * state.pz;
+    const float outR = SolarSystem::ZoneRadius;
+    const float inR  = SolarSystem::ZoneRadius - ZoneHysteresis;
+    if (!state.outOfZone && r2 > outR * outR) {
+      state.outOfZone = true;
+      state.zoneToast = ZoneToastTime;
+      Audio::zoneOut();
+    } else if (state.outOfZone && r2 < inR * inR) {
+      state.outOfZone = false;
+      state.zoneToast = ZoneToastTime;
+      Audio::zoneIn();
+    }
+    if (state.zoneToast > 0.0f) state.zoneToast -= dt;
+  }
 
   // Planet collision. Each rendered icosphere is a hard sphere — if the
   // post-integration position ended up inside one, snap the cockpit to
@@ -584,6 +631,24 @@ inline void update(GameState& g, float dt) {
     }
   }
 
+  // Cockpit warnings. The missile beeper speeds up as the missile
+  // closes; the klaxon repeats while the hull is too wrecked to fire.
+  {
+    static float beepCD = 0.0f, klaxonCD = 0.0f;
+    beepCD   -= dt;
+    klaxonCD -= dt;
+    float md = Missile::nearestIncomingDist(state.px, state.py, state.pz);
+    if (md >= 0.0f && beepCD <= 0.0f) {
+      Audio::incomingBeep();
+      float iv = md / 2500.0f;
+      beepCD = (iv < 0.12f) ? 0.12f : (iv > 0.9f ? 0.9f : iv);
+    }
+    if (g.hull > 0.0f && g.hull < 0.25f && klaxonCD <= 0.0f) {
+      Audio::hullCritical();
+      klaxonCD = 1.6f;
+    }
+  }
+
   // Any damage source that emptied the hull this frame ignites the
   // death animation. The check sits at the end of update so all damage
   // paths above feed into it.
@@ -592,32 +657,52 @@ inline void update(GameState& g, float dt) {
 
 // ---------- Projection ----------
 
-// Transform world-space delta `dp` into camera space; returns true if the
-// resulting cz is in front of the near plane (visible).
-inline bool toCamera(float dpx, float dpy, float dpz,
+constexpr int ViewCX = Config::ViewX + Config::ViewW / 2;
+constexpr int ViewCY = Config::ViewY + Config::ViewH / 2;
+
+// Camera right axis (right = up × forward). It is the only derived axis
+// of the basis, so it's cached once per render pass instead of being
+// re-crossed on every projection. Each render entry point (renderWorld,
+// renderRadarBlips, Sky::draw) syncs first, so the cache always matches
+// the basis update() left behind.
+struct Cam { float rx, ry, rz; };
+inline Cam cam = { 1.0f, 0.0f, 0.0f };
+
+inline void syncCamera() {
+  cam.rx = state.uy * state.fz - state.uz * state.fy;
+  cam.ry = state.uz * state.fx - state.ux * state.fz;
+  cam.rz = state.ux * state.fy - state.uy * state.fx;
+}
+
+// Rotate a world-space delta into camera space (x right, y up, z ahead).
+inline void camSpace(float dpx, float dpy, float dpz,
                      float& cx, float& cy, float& cz) {
-  // right = up × forward
-  float rx = state.uy * state.fz - state.uz * state.fy;
-  float ry = state.uz * state.fx - state.ux * state.fz;
-  float rz = state.ux * state.fy - state.uy * state.fx;
-  cx = dpx * rx       + dpy * ry       + dpz * rz;
+  cx = dpx * cam.rx   + dpy * cam.ry   + dpz * cam.rz;
   cy = dpx * state.ux + dpy * state.uy + dpz * state.uz;
   cz = dpx * state.fx + dpy * state.fy + dpz * state.fz;
-  return cz > NearZ;
+}
+
+// Camera-space point → screen pixel. Caller guarantees cz > 0.
+inline void toScreen(float cx, float cy, float cz, int& sx, int& sy) {
+  float k = FocalLen / cz;
+  sx = ViewCX + (int)(cx * k);
+  sy = ViewCY - (int)(cy * k);
+}
+
+// World point → screen. The near plane is the caller's: bodies, ships,
+// sparks and markers each cull at a different depth. Returns false (and
+// leaves sx/sy alone) when the point is behind it.
+inline bool project(float wx, float wy, float wz, float nearZ,
+                    int& sx, int& sy, float& cz) {
+  float cx, cy;
+  camSpace(wx - state.px, wy - state.py, wz - state.pz, cx, cy, cz);
+  if (cz <= nearZ) return false;
+  toScreen(cx, cy, cz, sx, sy);
+  return true;
 }
 
 inline bool projectPOI(const SolarSystem::POI& p, int& sx, int& sy, float& outCz) {
-  float dpx = (float)p.x - state.px;
-  float dpy = (float)p.y - state.py;
-  float dpz = (float)p.z - state.pz;
-  float cx, cy, cz;
-  if (!toCamera(dpx, dpy, dpz, cx, cy, cz)) return false;
-  outCz = cz;
-  const int vx = Config::ViewX + Config::ViewW / 2;
-  const int vy = Config::ViewY + Config::ViewH / 2;
-  sx = vx + (int)(cx * FocalLen / cz);
-  sy = vy - (int)(cy * FocalLen / cz);
-  return true;
+  return project((float)p.x, (float)p.y, (float)p.z, NearZ, sx, sy, outCz);
 }
 
 // ---------- Rendering ----------
@@ -660,7 +745,15 @@ constexpr int IcoSubVerts = 42;
 constexpr int IcoSubFaces = 80;
 inline float   icoSubV[IcoSubVerts][3];
 inline uint8_t icoSubF[IcoSubFaces][3];
+inline float   icoN[IcoSubFaces][3];   // unit face normals
+inline float   icoH[IcoSubFaces];      // face-plane distance from center (unit sphere)
 inline bool    icoSubReady = false;
+
+// Constant-angle trig for the ring and gate wireframes.
+constexpr int RingSegs = 18;
+constexpr int GateSegs = 12;
+inline float ringCos[RingSegs], ringSin[RingSegs];
+inline float gateCos[GateSegs], gateSin[GateSegs];
 
 inline void buildIcoSubdivided() {
   static const float A = 0.5257311f;
@@ -722,6 +815,30 @@ inline void buildIcoSubdivided() {
     icoSubF[nf][0] = c;   icoSubF[nf][1] = mCA; icoSubF[nf][2] = mBC; nf++;
     icoSubF[nf][0] = mAB; icoSubF[nf][1] = mBC; icoSubF[nf][2] = mCA; nf++;
   }
+
+  // Face normal = normalized centroid (the mesh is centered on the
+  // origin); the centroid length is how far the face plane sits from the
+  // center, which the perspective backface test needs.
+  for (int f = 0; f < IcoSubFaces; f++) {
+    const float* a = icoSubV[icoSubF[f][0]];
+    const float* b = icoSubV[icoSubF[f][1]];
+    const float* c = icoSubV[icoSubF[f][2]];
+    float nx = (a[0] + b[0] + c[0]) / 3.0f;
+    float ny = (a[1] + b[1] + c[1]) / 3.0f;
+    float nz = (a[2] + b[2] + c[2]) / 3.0f;
+    float h  = sqrtf(nx*nx + ny*ny + nz*nz);
+    icoN[f][0] = nx / h; icoN[f][1] = ny / h; icoN[f][2] = nz / h;
+    icoH[f] = h;
+  }
+
+  for (int k = 0; k < RingSegs; k++) {
+    float ang = (float)k * (6.2831853f / (float)RingSegs);
+    ringCos[k] = cosf(ang); ringSin[k] = sinf(ang);
+  }
+  for (int k = 0; k < GateSegs; k++) {
+    float ang = (float)k * (6.2831853f / (float)GateSegs);
+    gateCos[k] = cosf(ang); gateSin[k] = sinf(ang);
+  }
   icoSubReady = true;
 }
 
@@ -741,20 +858,17 @@ inline void renderIcoSphere(M5Canvas& g,
   // plane can't hand the rasterizer a megapixel triangle.
   struct V { int sx, sy; bool vis; };
   V pv[IcoSubVerts];
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
   constexpr float BodyNearZ  = 6.0f;
   constexpr int   CoordLimit = 3000;
   for (int i = 0; i < IcoSubVerts; i++) {
-    float dpx = pcx_w + icoSubV[i][0] * radius - state.px;
-    float dpy = pcy_w + icoSubV[i][1] * radius - state.py;
-    float dpz = pcz_w + icoSubV[i][2] * radius - state.pz;
     float cx, cy, cz;
-    toCamera(dpx, dpy, dpz, cx, cy, cz);
+    camSpace(pcx_w + icoSubV[i][0] * radius - state.px,
+             pcy_w + icoSubV[i][1] * radius - state.py,
+             pcz_w + icoSubV[i][2] * radius - state.pz, cx, cy, cz);
     pv[i].vis = (cz > BodyNearZ);
     if (pv[i].vis) {
-      int sxv = vxc + (int)(cx * FocalLen / cz);
-      int syv = vyc - (int)(cy * FocalLen / cz);
+      int sxv, syv;
+      toScreen(cx, cy, cz, sxv, syv);
       if (sxv < -CoordLimit) sxv = -CoordLimit;
       if (sxv >  CoordLimit) sxv =  CoordLimit;
       if (syv < -CoordLimit) syv = -CoordLimit;
@@ -769,20 +883,21 @@ inline void renderIcoSphere(M5Canvas& g,
   float vdy = state.py - pcy_w;
   float vdz = state.pz - pcz_w;
   float vdLen = sqrtf(vdx*vdx + vdy*vdy + vdz*vdz);
-  if (vdLen > 0.001f) { vdx/=vdLen; vdy/=vdLen; vdz/=vdLen; }
+  if (vdLen < 0.001f) return;
+  vdx /= vdLen; vdy /= vdLen; vdz /= vdLen;
+  // Perspective backface test: a face is visible when the camera is in
+  // front of its plane, n·(cam − center) > h·R. Up close that keeps
+  // only the cap actually facing the camera — the old orthographic
+  // n·v > 0 test also accepted faces past the horizon, which then
+  // overdrew visible ones.
+  const float rOverD = radius / vdLen;
 
   for (int f = 0; f < IcoSubFaces; f++) {
     int ia = icoSubF[f][0], ib = icoSubF[f][1], ic = icoSubF[f][2];
     if (!pv[ia].vis || !pv[ib].vis || !pv[ic].vis) continue;
-    // Face normal: centroid of unit-sphere verts points outward.
-    float nx = icoSubV[ia][0] + icoSubV[ib][0] + icoSubV[ic][0];
-    float ny = icoSubV[ia][1] + icoSubV[ib][1] + icoSubV[ic][1];
-    float nz = icoSubV[ia][2] + icoSubV[ib][2] + icoSubV[ic][2];
-    float nl = sqrtf(nx*nx + ny*ny + nz*nz);
-    if (nl < 0.001f) continue;
-    nx /= nl; ny /= nl; nz /= nl;
+    float nx = icoN[f][0], ny = icoN[f][1], nz = icoN[f][2];
     float vd = nx*vdx + ny*vdy + nz*vdz;
-    if (vd <= 0.0f) continue;     // backface
+    if (vd <= icoH[f] * rOverD) continue;     // backface
     uint16_t col = shader(nx, ny, nz, vd);
     g.fillTriangle(pv[ia].sx, pv[ia].sy,
                    pv[ib].sx, pv[ib].sy,
@@ -827,7 +942,7 @@ inline void renderStar3D(M5Canvas& g,
 // spanned by `u` and `v` (world-space basis vectors). Inner + outer
 // circles are drawn with N segments each, plus four spokes to give the
 // ring a constructed look at distance. Each per-vertex point is
-// projected through `toCamera` so the ring banks correctly as the
+// projected through the camera so the ring banks correctly as the
 // player rolls or pitches. `bodyRadius` is the planet's solid icosphere
 // radius — vertices behind the body are screen-space-occluded so the
 // ring doesn't appear to pass through the globe.
@@ -838,21 +953,21 @@ inline void renderPlanetRing3D(M5Canvas& g,
                                float vx, float vy, float vz,
                                float bodyRadius,
                                uint16_t color) {
-  constexpr int RingN = 18;
+  if (!icoSubReady) buildIcoSubdivided();
+  constexpr int RingN = RingSegs;
+  // Same clamp as the icosphere: a ring vertex just past the near plane
+  // can project tens of thousands of pixels off-screen.
+  constexpr int CoordLimit = 3000;
   int  sxO[RingN]; int syO[RingN]; bool visO[RingN];
   int  sxI[RingN]; int syI[RingN]; bool visI[RingN];
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
 
   // Planet center in camera space + screen-space disk for occlusion.
-  float pcxc, pcyc, pczc;
-  bool planetInFront = toCamera(pcx_w - state.px, pcy_w - state.py,
-                                pcz_w - state.pz, pcxc, pcyc, pczc);
   int planetSx = 0, planetSy = 0;
+  float pczc = 0.0f;
+  bool planetInFront = project(pcx_w, pcy_w, pcz_w, NearZ,
+                               planetSx, planetSy, pczc);
   float bodyRSq = 0.0f;
   if (planetInFront) {
-    planetSx = vxc + (int)(pcxc * FocalLen / pczc);
-    planetSy = vyc - (int)(pcyc * FocalLen / pczc);
     float pr = bodyRadius * FocalLen / pczc;
     bodyRSq = pr * pr;
   }
@@ -868,35 +983,25 @@ inline void renderPlanetRing3D(M5Canvas& g,
     int dy = syv - planetSy;
     return (float)(dx * dx + dy * dy) < bodyRSq;
   };
+  auto clampC = [](int& v) {
+    if (v < -CoordLimit) v = -CoordLimit;
+    if (v >  CoordLimit) v =  CoordLimit;
+  };
 
   for (int k = 0; k < RingN; k++) {
-    float ang = (float)k * (6.2831853f / (float)RingN);
-    float ca = cosf(ang), sa = sinf(ang);
-
-    // Outer point.
-    {
-      float wx = pcx_w + ca * outerR * ux + sa * outerR * vx;
-      float wy = pcy_w + ca * outerR * uy + sa * outerR * vy;
-      float wz = pcz_w + ca * outerR * uz + sa * outerR * vz;
-      float cx, cy, cz;
-      if (toCamera(wx - state.px, wy - state.py, wz - state.pz, cx, cy, cz)) {
-        sxO[k] = vxc + (int)(cx * FocalLen / cz);
-        syO[k] = vyc - (int)(cy * FocalLen / cz);
-        visO[k] = !occluded(sxO[k], syO[k], cz);
-      } else visO[k] = false;
-    }
-    // Inner point.
-    {
-      float wx = pcx_w + ca * innerR * ux + sa * innerR * vx;
-      float wy = pcy_w + ca * innerR * uy + sa * innerR * vy;
-      float wz = pcz_w + ca * innerR * uz + sa * innerR * vz;
-      float cx, cy, cz;
-      if (toCamera(wx - state.px, wy - state.py, wz - state.pz, cx, cy, cz)) {
-        sxI[k] = vxc + (int)(cx * FocalLen / cz);
-        syI[k] = vyc - (int)(cy * FocalLen / cz);
-        visI[k] = !occluded(sxI[k], syI[k], cz);
-      } else visI[k] = false;
-    }
+    float ca = ringCos[k], sa = ringSin[k];
+    float px = ca * ux + sa * vx;   // unit direction in the ring plane
+    float py = ca * uy + sa * vy;
+    float pz = ca * uz + sa * vz;
+    float cz;
+    visO[k] = project(pcx_w + px * outerR, pcy_w + py * outerR,
+                      pcz_w + pz * outerR, NearZ, sxO[k], syO[k], cz)
+           && !occluded(sxO[k], syO[k], cz);
+    if (visO[k]) { clampC(sxO[k]); clampC(syO[k]); }
+    visI[k] = project(pcx_w + px * innerR, pcy_w + py * innerR,
+                      pcz_w + pz * innerR, NearZ, sxI[k], syI[k], cz)
+           && !occluded(sxI[k], syI[k], cz);
+    if (visI[k]) { clampC(sxI[k]); clampC(syI[k]); }
   }
 
   for (int k = 0; k < RingN; k++) {
@@ -914,52 +1019,32 @@ inline void renderPlanetRing3D(M5Canvas& g,
   }
 }
 
-// 3D belt halo around a planet. Scatters ~40 deterministic dots in the
-// toroidal band between innerR and outerR (in the same plane as the
-// ring), each projected through toCamera so they bank with the camera.
-// Replaces the old 2D 6-dot ellipse indicator. `seed` is hashed from the
-// planet POI index so dots stay put across frames.
-inline void renderPlanetBelt3D(M5Canvas& g,
+// 3D belt halo around a planet: the ~40 dots cached by loadLayout() in
+// the toroidal band between the belt radii (same plane as the ring),
+// each projected through the camera so they bank with it.
+inline void renderPlanetBelt3D(M5Canvas& g, int poiIdx,
                                float pcx_w, float pcy_w, float pcz_w,
-                               float innerR, float outerR,
                                float ux, float uy, float uz,
                                float vx, float vy, float vz,
                                float bodyRadius,
-                               uint16_t color,
-                               uint32_t seed) {
-  constexpr int N = 40;
-  uint32_t s = seed | 1u;
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
-
+                               uint16_t color) {
   // Planet disk for occluding particles passing behind the body.
-  float pcxc, pcyc, pczc;
-  bool planetInFront = toCamera(pcx_w - state.px, pcy_w - state.py,
-                                pcz_w - state.pz, pcxc, pcyc, pczc);
   int planetSx = 0, planetSy = 0;
+  float pczc = 0.0f;
+  bool planetInFront = project(pcx_w, pcy_w, pcz_w, NearZ,
+                               planetSx, planetSy, pczc);
   float bodyRSq = 0.0f;
   if (planetInFront) {
-    planetSx = vxc + (int)(pcxc * FocalLen / pczc);
-    planetSy = vyc - (int)(pcyc * FocalLen / pczc);
     float pr = bodyRadius * FocalLen / pczc;
     bodyRSq = pr * pr;
   }
 
-  for (int i = 0; i < N; i++) {
-    s = s * 1664525u + 1013904223u;
-    float ang = (float)(s & 0xFFFFu) * (6.2831853f / 65536.0f);
-    s = s * 1664525u + 1013904223u;
-    float t  = (float)(s & 0xFFFFu) / 65536.0f;
-    float radius = innerR + t * (outerR - innerR);
-    float ca = cosf(ang), sa = sinf(ang);
-    float wx = pcx_w + ca * radius * ux + sa * radius * vx;
-    float wy = pcy_w + ca * radius * uy + sa * radius * vy;
-    float wz = pcz_w + ca * radius * uz + sa * radius * vz;
-    float cx, cy, cz;
-    if (!toCamera(wx - state.px, wy - state.py, wz - state.pz, cx, cy, cz))
-      continue;
-    int sx = vxc + (int)(cx * FocalLen / cz);
-    int sy = vyc - (int)(cy * FocalLen / cz);
+  for (int i = 0; i < HaloDots; i++) {
+    float a = (float)haloU[poiIdx][i];
+    float b = (float)haloV[poiIdx][i];
+    int sx, sy; float cz;
+    if (!project(pcx_w + a * ux + b * vx, pcy_w + a * uy + b * vy,
+                 pcz_w + a * uz + b * vz, NearZ, sx, sy, cz)) continue;
     if (sx < Config::ViewX || sx >= Config::ViewX + Config::ViewW) continue;
     if (sy < Config::ViewY || sy >= Config::ViewY + Config::ViewH) continue;
     // Behind-body occlusion.
@@ -1009,6 +1094,7 @@ inline void renderTargetBracket(M5Canvas& g);
 // pixel for very distant. Markers drawn back-to-front (rough painter sort
 // by descending cz).
 inline void renderWorld(M5Canvas& g) {
+  syncCamera();
   // Rocks first so POI markers and labels overlay them naturally.
   renderBelt(g);
 
@@ -1018,27 +1104,34 @@ inline void renderWorld(M5Canvas& g) {
   // its *center* leaves the viewport. If the center sits beside or behind
   // the camera but the body is close enough that its limb can still wrap
   // into view, keep it anyway and sort by raw distance.
-  struct Hit { int sx, sy; float cz; uint8_t i; };
+  //
+  // Draw order uses the power distance d² − r² (r = visual radius, 0 for
+  // the gate): for non-intersecting spheres that is a correct back-to-
+  // front order, and unlike camera-space cz it doesn't change as the
+  // camera turns — sorting by cz let a planet pop in front of the star
+  // it was behind just by rotating. `cz` is kept for the projected-size
+  // math below.
+  struct Hit { int sx, sy; float cz; float key; uint8_t i; };
   Hit hits[SolarSystem::MaxPOIs];
   int n = 0;
-  const int vcx = Config::ViewX + Config::ViewW / 2;
-  const int vcy = Config::ViewY + Config::ViewH / 2;
   for (int i = 0; i < layout.numPOIs; i++) {
     const auto& p = layout.poi[i];
     int sx, sy; float cz;
     bool centerOk = projectPOI(p, sx, sy, cz);
+    float dx = (float)p.x - state.px;
+    float dy = (float)p.y - state.py;
+    float dz = (float)p.z - state.pz;
+    float d2 = dx*dx + dy*dy + dz*dz;
     float bodyScale = (p.type == SolarSystem::POIType::Star)   ? StarVisualScale
                     : (p.type == SolarSystem::POIType::Planet) ? PlanetVisualScale
                     : 0.0f;
     if (bodyScale > 0.0f) {
-      float dx = (float)p.x - state.px;
-      float dy = (float)p.y - state.py;
-      float dz = (float)p.z - state.pz;
-      float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+      float dist = sqrtf(d2);
       float worldR = (float)p.radius * bodyScale;
+      float key = d2 - worldR * worldR;
       if (!centerOk) {
         if (dist < worldR * 1.6f + 2.0f * NearZ) {
-          hits[n++] = { vcx, vcy, dist, (uint8_t)i };
+          hits[n++] = { ViewCX, ViewCY, dist, key, (uint8_t)i };
         }
         continue;
       }
@@ -1046,18 +1139,18 @@ inline void renderWorld(M5Canvas& g) {
       if (margin > 4000) margin = 4000;
       if (sx < Config::ViewX - margin || sx > Config::ViewX + Config::ViewW + margin) continue;
       if (sy < Config::ViewY - margin || sy > Config::ViewY + Config::ViewH + margin) continue;
-      hits[n++] = { sx, sy, cz, (uint8_t)i };
+      hits[n++] = { sx, sy, cz, key, (uint8_t)i };
       continue;
     }
     if (!centerOk) continue;
     if (sx < Config::ViewX - 40 || sx > Config::ViewX + Config::ViewW + 40) continue;
     if (sy < Config::ViewY - 40 || sy > Config::ViewY + Config::ViewH + 40) continue;
-    hits[n++] = { sx, sy, cz, (uint8_t)i };
+    hits[n++] = { sx, sy, cz, d2, (uint8_t)i };
   }
-  // Insertion sort by cz desc — n is tiny.
+  // Insertion sort by key desc (farthest first) — n is tiny.
   for (int i = 1; i < n; i++) {
     Hit h = hits[i]; int j = i - 1;
-    while (j >= 0 && hits[j].cz < h.cz) { hits[j+1] = hits[j]; j--; }
+    while (j >= 0 && hits[j].key < h.key) { hits[j+1] = hits[j]; j--; }
     hits[j+1] = h;
   }
 
@@ -1146,13 +1239,10 @@ inline void renderWorld(M5Canvas& g) {
                                worldR, TFT_LIGHTGREY);
           }
           if (hasBelt) {
-            renderPlanetBelt3D(g, (float)p.x, (float)p.y, (float)p.z,
-                               (float)p.radius + 600.0f,
-                               (float)p.radius + 2400.0f,
+            renderPlanetBelt3D(g, hits[k].i,
+                               (float)p.x, (float)p.y, (float)p.z,
                                bux, buy, buz, bvx, bvy, bvz,
-                               worldR,
-                               TFT_DARKGREY,
-                               (uint32_t)hits[k].i * 0x9E3779B1u);
+                               worldR, TFT_DARKGREY);
           }
           r = pr; labelR = pr;
         } else {
@@ -1167,13 +1257,10 @@ inline void renderWorld(M5Canvas& g) {
                                worldR, TFT_LIGHTGREY);
           }
           if (hasBelt) {
-            renderPlanetBelt3D(g, (float)p.x, (float)p.y, (float)p.z,
-                               (float)p.radius + 600.0f,
-                               (float)p.radius + 2400.0f,
+            renderPlanetBelt3D(g, hits[k].i,
+                               (float)p.x, (float)p.y, (float)p.z,
                                bux, buy, buz, bvx, bvy, bvz,
-                               worldR,
-                               TFT_DARKGREY,
-                               (uint32_t)hits[k].i * 0x9E3779B1u);
+                               worldR, TFT_DARKGREY);
           }
           r = pr; labelR = pr;
         }
@@ -1193,28 +1280,17 @@ inline void renderWorld(M5Canvas& g) {
         float nxw = (gLen > 1.0f) ? -gx / gLen : 0.0f;
         float nzw = (gLen > 1.0f) ? -gz / gLen : 1.0f;
         float ux = -nzw, uz = nxw;       // ring plane horizontal axis
-        constexpr int RingN = 12;
+        if (!icoSubReady) buildIcoSubdivided();
+        constexpr int RingN = GateSegs;
         int  rsx[RingN]; int rsy[RingN]; bool rvis[RingN];
         float ringR = (float)p.radius;
         for (int kk = 0; kk < RingN; kk++) {
-          float ang = (float)kk * (6.2831853f / (float)RingN);
-          float ca = cosf(ang), sa = sinf(ang);
-          float wx = gx + ca * ringR * ux;
-          float wy = gy + sa * ringR;     // ring centered on gate, world-up is v
-          float wz = gz + ca * ringR * uz;
-          float dpx = wx - state.px;
-          float dpy = wy - state.py;
-          float dpz = wz - state.pz;
-          float cxx, cyy, czz;
-          if (toCamera(dpx, dpy, dpz, cxx, cyy, czz)) {
-            const int vxc = Config::ViewX + Config::ViewW / 2;
-            const int vyc = Config::ViewY + Config::ViewH / 2;
-            rsx[kk]  = vxc + (int)(cxx * FocalLen / czz);
-            rsy[kk]  = vyc - (int)(cyy * FocalLen / czz);
-            rvis[kk] = true;
-          } else {
-            rvis[kk] = false;
-          }
+          float ca = gateCos[kk], sa = gateSin[kk];
+          float czz;
+          // Ring centered on the gate; world-up is the in-plane v axis.
+          rvis[kk] = project(gx + ca * ringR * ux, gy + sa * ringR,
+                             gz + ca * ringR * uz, NearZ,
+                             rsx[kk], rsy[kk], czz);
         }
         // Outer ring in magenta — bright when close, dim when far.
         uint16_t rim = (cz < 4000.0f) ? TFT_MAGENTA : 0x4810;
@@ -1303,40 +1379,27 @@ inline void renderWorld(M5Canvas& g) {
 // target ahead of you shows at the top of the scope), at a radial offset
 // proportional to distance up to RadarRange. The little vertical line is
 // the Elite-style altitude bar — positive cy (above plane) draws upward.
-constexpr float RadarRange = 30000.0f;   // sysu, covers the full system cube
+constexpr float RadarRange = SolarSystem::ZoneRadius;   // sysu, the whole zone
 constexpr int   RadarCX    = Config::ScreenW / 2;
 constexpr int   RadarCY    = Config::HudY + 14;
 constexpr int   RadarRX    = 26;
 constexpr int   RadarRY    = 11;
 
 inline void renderRadarBlips(M5Canvas& g) {
-  // Basis vectors (right = up × forward). Same transform as toCamera but
-  // without the near-plane cull so POIs behind the ship show on the
-  // bottom of the scope.
-  float rxw = state.uy * state.fz - state.uz * state.fy;
-  float ryw = state.uz * state.fx - state.ux * state.fz;
-  float rzw = state.ux * state.fy - state.uy * state.fx;
-  for (int i = 0; i < layout.numPOIs; i++) {
-    const auto& p = layout.poi[i];
-    if (p.type == SolarSystem::POIType::Star) continue;
-    float dpx = (float)p.x - state.px;
-    float dpy = (float)p.y - state.py;
-    float dpz = (float)p.z - state.pz;
-    float cx = dpx * rxw       + dpy * ryw       + dpz * rzw;
-    float cy = dpx * state.ux  + dpy * state.uy  + dpz * state.uz;
-    float cz = dpx * state.fx  + dpy * state.fy  + dpz * state.fz;
-
+  // Same camera transform as the viewport but without the near-plane
+  // cull, so POIs behind the ship show on the bottom of the scope.
+  syncCamera();
+  // POI blip with its Elite-style altitude bar (sysu per pixel).
+  auto poiBlip = [&](const SolarSystem::POI& p, uint16_t col) {
+    float cx, cy, cz;
+    camSpace((float)p.x - state.px, (float)p.y - state.py,
+             (float)p.z - state.pz, cx, cy, cz);
     float horiz = sqrtf(cx*cx + cz*cz);
-    if (horiz < 1.0f) continue;
+    if (horiz < 1.0f) return;
     float dNorm = horiz / RadarRange;
     if (dNorm > 1.0f) dNorm = 1.0f;
-    float nx =  cx / horiz;
-    float nz =  cz / horiz;
-    int bx = RadarCX + (int)(nx * (RadarRX - 1) * dNorm);
-    int by = RadarCY - (int)(nz * (RadarRY - 1) * dNorm);
-
-    uint16_t col = (i == state.targetIdx) ? TFT_WHITE : poiColor(p);
-    // Altitude bar — sysu per pixel.
+    int bx = RadarCX + (int)((cx / horiz) * (RadarRX - 1) * dNorm);
+    int by = RadarCY - (int)((cz / horiz) * (RadarRY - 1) * dNorm);
     int v = (int)(cy / 1800.0f);
     if (v >  6) v =  6;
     if (v < -6) v = -6;
@@ -1346,7 +1409,18 @@ inline void renderRadarBlips(M5Canvas& g) {
       g.drawFastVLine(bx, y0, y1p - y0 + 1, col);
     }
     g.fillRect(bx - 1, by - 1, 3, 3, col);
+  };
+  int starI = -1;
+  for (int i = 0; i < layout.numPOIs; i++) {
+    const auto& p = layout.poi[i];
+    if (p.type == SolarSystem::POIType::Star) { starI = i; continue; }
+    poiBlip(p, (i == state.targetIdx && !state.outOfZone) ? TFT_WHITE
+                                                          : poiColor(p));
   }
+  // Inside the system the star is the scope's frame of reference; out in
+  // deep space it becomes the home blip on the rim, drawn last so the
+  // planet blips clustered on the same bearing can't cover it.
+  if (state.outOfZone && starI >= 0) poiBlip(layout.poi[starI], TFT_YELLOW);
 
   // R16: NPC ships as 1-pixel blips in the ship's own color (no vert bar
   // — they're typically close to the player's altitude). Stays within
@@ -1355,11 +1429,9 @@ inline void renderRadarBlips(M5Canvas& g) {
     for (int i = 0; i < NPCShip::MaxNPCs; i++) {
       const auto& sh = NPCShip::ships[i];
       if (!sh.active) continue;
-      float dpx = sh.wx - state.px;
-      float dpy = sh.wy - state.py;
-      float dpz = sh.wz - state.pz;
-      float cx = dpx * rxw      + dpy * ryw      + dpz * rzw;
-      float cz = dpx * state.fx + dpy * state.fy + dpz * state.fz;
+      float cx, cy, cz;
+      camSpace(sh.wx - state.px, sh.wy - state.py, sh.wz - state.pz,
+               cx, cy, cz);
       float horiz = sqrtf(cx * cx + cz * cz);
       if (horiz < 1.0f) continue;
       float dNorm = horiz / RadarRange;
@@ -1383,11 +1455,8 @@ inline void renderRadarBlips(M5Canvas& g) {
   for (int i = 0; i < Missile::MaxMissiles; i++) {
     const auto& m = Missile::pool[i];
     if (!m.active) continue;
-    float dpx = m.wx - state.px;
-    float dpy = m.wy - state.py;
-    float dpz = m.wz - state.pz;
-    float cx = dpx * rxw      + dpy * ryw      + dpz * rzw;
-    float cz = dpx * state.fx + dpy * state.fy + dpz * state.fz;
+    float cx, cy, cz;
+    camSpace(m.wx - state.px, m.wy - state.py, m.wz - state.pz, cx, cy, cz);
     float horiz = sqrtf(cx * cx + cz * cz);
     if (horiz < 1.0f) continue;
     float dNorm = horiz / RadarRange;
@@ -1428,10 +1497,21 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
 
   g.setTextSize(1);
 
-  // Top-left target readout — only when a POI is actually selected. The
-  // alert stack and corner status below must NOT be gated on this, or the
-  // H=DOCK / HOSTILE / WARP prompts vanish whenever no POI is targeted.
-  if (state.targetIdx >= 0 && state.targetIdx < layout.numPOIs) {
+  // Top-left readout. In deep space it reports the way home instead of
+  // the target (whose marker is hidden out there). Otherwise it shows the
+  // selected POI, if any. The alert stack and corner status below must
+  // NOT be gated on this, or the H=DOCK / HOSTILE / WARP prompts vanish
+  // whenever no POI is targeted.
+  if (state.outOfZone) {
+    g.setTextColor(0x5D7F /*pale blue*/, TFT_BLACK);
+    g.setCursor(3, 3);
+    g.print("DEEP SPACE");
+    float home = sqrtf(state.px * state.px + state.py * state.py +
+                       state.pz * state.pz) / 1000.0f;
+    g.setTextColor(TFT_YELLOW, TFT_BLACK);
+    g.setCursor(3, 13);
+    g.printf("SUN %dK", (int)home);
+  } else if (state.targetIdx >= 0 && state.targetIdx < layout.numPOIs) {
     const auto& p = layout.poi[state.targetIdx];
     char nm[20];
     SolarSystem::displayName(state.loadedSys, p, nm, sizeof(nm));
@@ -1527,6 +1607,18 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     g.setTextColor(TFT_ORANGE, TFT_BLACK);
     g.setCursor(x, Config::ViewY + 3);
     g.print(tag);
+  }
+
+  // Zone crossing banner, one row under the promotion slot.
+  if (state.zoneToast > 0.0f) {
+    char line[32];
+    snprintf(line, sizeof(line), "%s %s",
+             state.outOfZone ? "LEAVING" : "ENTERING",
+             Galaxy::systems[state.loadedSys].name);
+    int w = (int)strlen(line) * 6;
+    g.setTextColor(state.outOfZone ? 0x5D7F : TFT_GREEN, TFT_BLACK);
+    g.setCursor(Config::ViewX + (Config::ViewW - w) / 2, Config::ViewY + 26);
+    g.print(line);
   }
 
   // R24: promotion banner — drawn one row below the precedence stack so
@@ -1650,11 +1742,10 @@ inline int planetInLandingRange() {
 // in sysu (planet radius + a small clearance).
 inline void enterNearPOI(int sysIdx, int poiIdx, float standoff) {
   bool switched = (state.loadedSys != sysIdx);
-  if (switched) {
-    SolarSystem::layoutFor(sysIdx, layout);
-    state.loadedSys = sysIdx;
-  }
+  if (switched) loadLayout(sysIdx);
   activeBelt = -1;
+  state.outOfZone = false;
+  state.zoneToast = 0.0f;
   if (switched) {
     NPCShip::spawnFor(sysIdx, layout);
     Combat::resetFlashes();
@@ -1751,15 +1842,9 @@ inline void renderBelt(M5Canvas& g) {
   const auto& p = layout.poi[activeBelt];
   float pcx = (float)p.x, pcy = (float)p.y, pcz = (float)p.z;
   for (int i = 0; i < NumRocks; i++) {
-    float dpx = pcx + (float)rocks[i].rx - state.px;
-    float dpy = pcy + (float)rocks[i].ry - state.py;
-    float dpz = pcz + (float)rocks[i].rz - state.pz;
-    float cx, cy, cz;
-    if (!toCamera(dpx, dpy, dpz, cx, cy, cz)) continue;
-    const int vx = Config::ViewX + Config::ViewW / 2;
-    const int vy = Config::ViewY + Config::ViewH / 2;
-    int sx = vx + (int)(cx * FocalLen / cz);
-    int sy = vy - (int)(cy * FocalLen / cz);
+    int sx, sy; float cz;
+    if (!project(pcx + (float)rocks[i].rx, pcy + (float)rocks[i].ry,
+                 pcz + (float)rocks[i].rz, NearZ, sx, sy, cz)) continue;
     if (sx < Config::ViewX || sx >= Config::ViewX + Config::ViewW) continue;
     if (sy < Config::ViewY || sy >= Config::ViewY + Config::ViewH) continue;
     int r = (int)(140.0f / cz);
@@ -1776,11 +1861,6 @@ inline void renderBelt(M5Canvas& g) {
 // model-space yaw / pitch derived from the ship's world heading.
 inline void renderNPCShips(M5Canvas& g) {
   if (NPCShip::loadedSys != state.loadedSys) return;
-  // Camera basis (right = up × forward) — reused per ship to transform
-  // each NPC's world axes into camera space.
-  float rxw = state.uy * state.fz - state.uz * state.fy;
-  float ryw = state.uz * state.fx - state.ux * state.fz;
-  float rzw = state.ux * state.fy - state.uy * state.fx;
 
   // A ship is hidden when the camera→ship segment passes through a
   // star/planet body — without this, silhouettes draw on top of the
@@ -1812,7 +1892,7 @@ inline void renderNPCShips(M5Canvas& g) {
     float dpy = sh.wy - state.py;
     float dpz = sh.wz - state.pz;
     float cxx, cyy, czz;
-    if (!toCamera(dpx, dpy, dpz, cxx, cyy, czz)) continue;
+    camSpace(dpx, dpy, dpz, cxx, cyy, czz);
     if (czz < 60.0f) continue;          // tighter than NearZ — avoid huge sprites
     float shipDist = sqrtf(dpx*dpx + dpy*dpy + dpz*dpz);
     if (shipDist > 1.0f && hiddenByBody(dpx, dpy, dpz, shipDist)) continue;
@@ -1825,10 +1905,10 @@ inline void renderNPCShips(M5Canvas& g) {
     float wfx = Sy * Cp;
     float wfy = Sp;
     float wfz = Cy * Cp;
-    float cfx = wfx * rxw      + wfy * ryw       + wfz * rzw;
-    float cfy = wfx * state.ux + wfy * state.uy  + wfz * state.uz;
-    float cfz = wfx * state.fx + wfy * state.fy  + wfz * state.fz;
-    float cux = ryw;
+    float cfx, cfy, cfz;
+    camSpace(wfx, wfy, wfz, cfx, cfy, cfz);
+    // World up (0,1,0) in camera space.
+    float cux = cam.ry;
     float cuy = state.uy;
     float cuz = state.fy;
     Ship3D::renderBasis(g, Ship3D::byId(sh.modelId),
@@ -1843,8 +1923,6 @@ inline void renderNPCShips(M5Canvas& g) {
 // camera as ships; size shrinks and color fades as the particle ages so
 // the burst reads as a quick puff rather than a static splatter.
 inline void renderParticles(M5Canvas& g) {
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
   const int x0 = Config::ViewX + 1;
   const int y0 = Config::ViewY + 1;
   const int x1 = Config::ViewX + Config::ViewW - 2;
@@ -1852,11 +1930,8 @@ inline void renderParticles(M5Canvas& g) {
   for (int i = 0; i < Particles::MaxParticles; i++) {
     const auto& p = Particles::pool[i];
     if (!p.alive) continue;
-    float cx, cy, cz;
-    if (!toCamera(p.wx - state.px, p.wy - state.py, p.wz - state.pz,
-                  cx, cy, cz)) continue;
-    int sx = vxc + (int)(cx * FocalLen / cz);
-    int sy = vyc - (int)(cy * FocalLen / cz);
+    int sx, sy; float cz;
+    if (!project(p.wx, p.wy, p.wz, NearZ, sx, sy, cz)) continue;
     if (sx < x0 || sx > x1 || sy < y0 || sy > y1) continue;
     float frac = (p.life0 > 0.0f) ? (p.life / p.life0) : 0.0f;
     // Young particle: bright yellow flash. Then weapon-tier color. Then
@@ -1915,16 +1990,8 @@ inline void renderLasers(M5Canvas& g) {
     int ty = reticleY;
     if (Combat::playerFlash.shipIdx >= 0) {
       const auto& sh = NPCShip::ships[Combat::playerFlash.shipIdx];
-      float dpx = sh.wx - state.px;
-      float dpy = sh.wy - state.py;
-      float dpz = sh.wz - state.pz;
-      float cxx, cyy, czz;
-      if (toCamera(dpx, dpy, dpz, cxx, cyy, czz)) {
-        const int vxc = Config::ViewX + Config::ViewW / 2;
-        const int vyc = Config::ViewY + Config::ViewH / 2;
-        tx = vxc + (int)(cxx * FocalLen / czz);
-        ty = vyc - (int)(cyy * FocalLen / czz);
-      }
+      int sx, sy; float czz;
+      if (project(sh.wx, sh.wy, sh.wz, NearZ, sx, sy, czz)) { tx = sx; ty = sy; }
     }
     uint16_t col = Combat::playerFlash.color;
     int leftX  = Config::ViewX + 8;
@@ -1940,15 +2007,8 @@ inline void renderLasers(M5Canvas& g) {
     if (Combat::npcFlash[i].t <= 0.0f) continue;
     const auto& sh = NPCShip::ships[i];
     if (!sh.active) continue;
-    float dpx = sh.wx - state.px;
-    float dpy = sh.wy - state.py;
-    float dpz = sh.wz - state.pz;
-    float cxx, cyy, czz;
-    if (!toCamera(dpx, dpy, dpz, cxx, cyy, czz)) continue;
-    const int vxc = Config::ViewX + Config::ViewW / 2;
-    const int vyc = Config::ViewY + Config::ViewH / 2;
-    int sx = vxc + (int)(cxx * FocalLen / czz);
-    int sy = vyc - (int)(cyy * FocalLen / czz);
+    int sx, sy; float czz;
+    if (!project(sh.wx, sh.wy, sh.wz, NearZ, sx, sy, czz)) continue;
     float prog = 1.0f - (Combat::npcFlash[i].t / Combat::FlashLifetime);
     drawBullet(sx, sy, reticleX, reticleY, prog, Combat::npcFlash[i].color);
   }
@@ -1962,26 +2022,15 @@ inline void renderMissiles(M5Canvas& g) {
     const auto& m = Missile::pool[i];
     if (!m.active) continue;
 
-    float dpx = m.wx - state.px;
-    float dpy = m.wy - state.py;
-    float dpz = m.wz - state.pz;
-    float cxx, cyy, czz;
-    if (!toCamera(dpx, dpy, dpz, cxx, cyy, czz)) continue;
-    const int vxc = Config::ViewX + Config::ViewW / 2;
-    const int vyc = Config::ViewY + Config::ViewH / 2;
-    int hx = vxc + (int)(cxx * FocalLen / czz);
-    int hy = vyc - (int)(cyy * FocalLen / czz);
+    int hx, hy; float czz;
+    if (!project(m.wx, m.wy, m.wz, NearZ, hx, hy, czz)) continue;
     if (hx < Config::ViewX - 8 || hx > Config::ViewX + Config::ViewW + 8) continue;
     if (hy < Config::ViewY - 8 || hy > Config::ViewY + Config::ViewH + 8) continue;
 
     // Tail = head minus a tiny step back along velocity in world space.
-    float tx = m.wx - m.vx * 0.05f - state.px;
-    float ty = m.wy - m.vy * 0.05f - state.py;
-    float tz = m.wz - m.vz * 0.05f - state.pz;
-    float tcxx, tcyy, tczz;
-    if (toCamera(tx, ty, tz, tcxx, tcyy, tczz)) {
-      int tlx = vxc + (int)(tcxx * FocalLen / tczz);
-      int tly = vyc - (int)(tcyy * FocalLen / tczz);
+    int tlx, tly; float tczz;
+    if (project(m.wx - m.vx * 0.05f, m.wy - m.vy * 0.05f, m.wz - m.vz * 0.05f,
+                NearZ, tlx, tly, tczz)) {
       g.drawLine(hx, hy, tlx, tly, m.color);
     }
     // Hot pixel at the head so the missile stays visible even at range.
@@ -2007,65 +2056,62 @@ inline void drawBracket(M5Canvas& g, int sx, int sy, int r, uint16_t col) {
 
 // Draw a marker for a world-space point. On-screen → bracket square that
 // shrinks with distance; off-screen or behind the camera → arrowhead
-// pasted on the viewport edge pointing toward the world position.
-inline void drawWorldMarker(M5Canvas& g,
+// pasted on the viewport edge pointing the way to turn toward it (unless
+// `edgeArrow` is false). Returns true if the on-screen bracket was drawn.
+inline bool drawWorldMarker(M5Canvas& g,
                             float wx, float wy, float wz,
-                            uint16_t color) {
-  float dpx = wx - state.px;
-  float dpy = wy - state.py;
-  float dpz = wz - state.pz;
-  // Inline camera transform so we can still produce a screen direction
-  // when the target is behind the cockpit.
-  float rx = state.uy * state.fz - state.uz * state.fy;
-  float ry = state.uz * state.fx - state.ux * state.fz;
-  float rz = state.ux * state.fy - state.uy * state.fx;
-  float cxx = dpx * rx       + dpy * ry       + dpz * rz;
-  float cyy = dpx * state.ux + dpy * state.uy + dpz * state.uz;
-  float czz = dpx * state.fx + dpy * state.fy + dpz * state.fz;
+                            uint16_t color, bool edgeArrow = true) {
+  // Raw camera space (not culled) so a target behind the cockpit still
+  // gives a direction.
+  float cxx, cyy, czz;
+  camSpace(wx - state.px, wy - state.py, wz - state.pz, cxx, cyy, czz);
 
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
   const int xL  = Config::ViewX + 6;
   const int xR  = Config::ViewX + Config::ViewW  - 7;
   const int yT  = Config::ViewY + 6;
   const int yB  = Config::ViewY + Config::ViewH  - 7;
 
   if (czz > NearZ) {
-    int sx = vxc + (int)(cxx * FocalLen / czz);
-    int sy = vyc - (int)(cyy * FocalLen / czz);
+    int sx, sy;
+    toScreen(cxx, cyy, czz, sx, sy);
     bool inView = (sx >= xL && sx <= xR && sy >= yT && sy <= yB);
     if (inView) {
       int r = (int)(900.0f * FocalLen / czz);
       if (r < 7)  r = 7;
       if (r > 20) r = 20;
       drawBracket(g, sx, sy, r, color);
-      return;
+      return true;
     }
     // In front but off-screen — fall through to edge arrow.
   }
+  if (!edgeArrow) return false;
 
-  // Off-screen or behind — direction from viewport center toward target.
-  // When the target is behind, flip the camera-space x,y signs so the
-  // arrow points to the rear of the screen.
-  float dx = cxx, dy = cyy;
-  if (czz <= NearZ) { dx = -dx; dy = -dy; }
-  // Screen-space direction (sy axis flipped vs cy in camera).
-  float sxd = dx;
-  float syd = -dy;
+  // Off-screen or behind — the arrow points along the target's camera-
+  // space (x, y): the way to pitch / turn to bring it ahead. That holds
+  // behind the camera too, so no sign flip there (the old flip sent a
+  // behind-right target's arrow to the left edge, and made the arrow
+  // jump sides as the target crossed the camera plane). Screen y is
+  // flipped vs camera y.
+  float sxd = cxx;
+  float syd = -cyy;
   float len = sqrtf(sxd*sxd + syd*syd);
-  if (len < 1e-3f) return;
-  sxd /= len; syd /= len;
+  if (len < 1e-3f * (fabsf(czz) + 1.0f)) {
+    // Dead astern — any turn works; point at the bottom edge.
+    sxd = 0.0f; syd = 1.0f;
+  } else {
+    sxd /= len; syd /= len;
+  }
 
   // Find which viewport edge the ray hits first.
   float t = 1e9f;
-  if (sxd > 0.0f) { float tt = (float)(xR - vxc) / sxd; if (tt < t) t = tt; }
-  if (sxd < 0.0f) { float tt = (float)(xL - vxc) / sxd; if (tt < t) t = tt; }
-  if (syd > 0.0f) { float tt = (float)(yB - vyc) / syd; if (tt < t) t = tt; }
-  if (syd < 0.0f) { float tt = (float)(yT - vyc) / syd; if (tt < t) t = tt; }
-  if (t <= 0.0f || t > 1e8f) return;
+  if (sxd > 0.0f) { float tt = (float)(xR - ViewCX) / sxd; if (tt < t) t = tt; }
+  if (sxd < 0.0f) { float tt = (float)(xL - ViewCX) / sxd; if (tt < t) t = tt; }
+  if (syd > 0.0f) { float tt = (float)(yB - ViewCY) / syd; if (tt < t) t = tt; }
+  if (syd < 0.0f) { float tt = (float)(yT - ViewCY) / syd; if (tt < t) t = tt; }
+  if (t <= 0.0f || t > 1e8f) return false;
 
-  int ex = vxc + (int)(sxd * t);
-  int ey = vyc + (int)(syd * t);
+  int ex = ViewCX + (int)(sxd * t);
+  int ey = ViewCY + (int)(syd * t);
   // Arrowhead triangle. Tip at (ex, ey), base 6 px back along -direction.
   float bxc = ex - sxd * 6.0f;
   float byc = ey - syd * 6.0f;
@@ -2075,6 +2121,7 @@ inline void drawWorldMarker(M5Canvas& g,
   int b2x = (int)(bxc - perpx * 4.0f);
   int b2y = (int)(byc - perpy * 4.0f);
   g.fillTriangle(ex, ey, b1x, b1y, b2x, b2y, color);
+  return false;
 }
 
 // Bracket / arrow for the locked NPC (red).
@@ -2082,17 +2129,16 @@ inline void renderLockBracket(M5Canvas& g) {
   if (state.lockedNPC < 0 || state.lockedNPC >= NPCShip::MaxNPCs) return;
   const auto& sh = NPCShip::ships[state.lockedNPC];
   if (!sh.active) return;
-  drawWorldMarker(g, sh.wx, sh.wy, sh.wz, TFT_RED);
+  // In deep space only a ship you can actually see keeps its bracket —
+  // the off-screen arrow is hidden with the other target markers.
+  bool onScreen = drawWorldMarker(g, sh.wx, sh.wy, sh.wz, TFT_RED,
+                                  !state.outOfZone);
+  if (state.outOfZone && !onScreen) return;
 
   // HP readout: shield + hull bars floating just above the locked ship.
   // Projected through the same camera so they track the target on screen.
-  float cxx, cyy, czz;
-  if (!toCamera(sh.wx - state.px, sh.wy - state.py, sh.wz - state.pz,
-                cxx, cyy, czz)) return;
-  const int vxc = Config::ViewX + Config::ViewW / 2;
-  const int vyc = Config::ViewY + Config::ViewH / 2;
-  int sx = vxc + (int)(cxx * FocalLen / czz);
-  int sy = vyc - (int)(cyy * FocalLen / czz);
+  int sx, sy; float czz;
+  if (!project(sh.wx, sh.wy, sh.wz, NearZ, sx, sy, czz)) return;
   const int barW = 28, barH = 2;
   int bx = sx - barW / 2;
   int by = sy - 16;                          // above the bracket
@@ -2120,9 +2166,10 @@ inline void renderLockBracket(M5Canvas& g) {
 }
 
 // Bracket / arrow for the current target POI (cyan). Skipped while
-// warping — the WARP banner is feedback enough.
+// warping — the WARP banner is feedback enough — and in deep space, where
+// target markers stay hidden until the player is back in the zone.
 inline void renderTargetBracket(M5Canvas& g) {
-  if (state.warping) return;
+  if (state.warping || state.outOfZone) return;
   if (state.targetIdx < 0 || state.targetIdx >= layout.numPOIs) return;
   const auto& p = layout.poi[state.targetIdx];
   if (p.type == SolarSystem::POIType::Star) return;   // pointing at the sun is daft

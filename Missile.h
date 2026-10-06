@@ -8,6 +8,7 @@
 #include "Quest.h"
 #include "Rank.h"
 #include "Audio.h"
+#include "Combat.h"
 
 // Refit R21: missiles + ECM.
 //
@@ -32,8 +33,6 @@ constexpr float PlayerDamage    = 0.45f;    // applied to player shields
 
 constexpr float ECMRadius       = 4500.0f;  // sysu — blast wipes missiles
 constexpr float ECMCooldown     = 6.0f;     // s between ECM uses
-
-constexpr int   PlayerKillBountyTenthsCR = 250;  // mirrors Combat.h
 
 struct Projectile {
   bool     active;
@@ -70,6 +69,20 @@ inline bool incomingToPlayer() {
     if (pool[i].active && !pool[i].fromPlayer) return true;
   }
   return false;
+}
+
+// Distance to the closest NPC missile homing on the player, or -1 if
+// none. Drives the incoming-missile beeper's tempo.
+inline float nearestIncomingDist(float px, float py, float pz) {
+  float best = -1.0f;
+  for (int i = 0; i < MaxMissiles; i++) {
+    const Projectile& m = pool[i];
+    if (!m.active || m.fromPlayer) continue;
+    float dx = m.wx - px, dy = m.wy - py, dz = m.wz - pz;
+    float d = sqrtf(dx*dx + dy*dy + dz*dz);
+    if (best < 0.0f || d < best) best = d;
+  }
+  return best;
 }
 
 // Player launches a missile at `targetNPC`. Spawns the projectile a few
@@ -220,19 +233,12 @@ inline void update(GameState& g, float dt,
               sh.hull -= NPCDamage;
             }
             if (sh.hull <= 0.0f) {
-              g.kills++;
-              if (sh.role == NPCShip::Role::Pirate) {
-                g.credits += PlayerKillBountyTenthsCR;
-              }
-              // R22: missile kill shifts standing same as laser kill.
-              Faction::applyKill(g, sh.role, (Faction::Id)sh.homeFaction);
-              // R30: patrol quests advance on pirate kills.
-              if (sh.role == NPCShip::Role::Pirate) Quest::onPirateKill(g);
-              // R24: rank ladder.
-              Rank::checkPromotion(g);
-              sh.active = false;
-              NPCShip::numActive--;
-              if (NPCShip::numActive < 0) NPCShip::numActive = 0;
+              // Same bookkeeping as a laser kill: bounty, kill count,
+              // standing, quest progress, rank, explosion.
+              Combat::registerPlayerKill(g, sh);
+            } else {
+              Audio::hitTarget();
+              Particles::spawnBurst(sh.wx, sh.wy, sh.wz, 0xFFE0, 16);
             }
             m.active = false;
             continue;
@@ -242,17 +248,7 @@ inline void update(GameState& g, float dt,
     } else {
       float dx = playerX - m.wx, dy = playerY - m.wy, dz = playerZ - m.wz;
       if (dx*dx + dy*dy + dz*dz < HitRadius * HitRadius) {
-        if (g.shield > 0.0f) {
-          g.shield -= PlayerDamage;
-          if (g.shield < 0.0f) {
-            g.hull += g.shield;
-            g.shield = 0.0f;
-          }
-        } else {
-          g.hull -= PlayerDamage;
-        }
-        if (g.hull < 0.0f) g.hull = 0.0f;
-        Audio::playerHit();   // R28
+        Combat::damagePlayer(g, PlayerDamage);
         m.active = false;
         continue;
       }

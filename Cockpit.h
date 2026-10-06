@@ -52,8 +52,7 @@ inline void drawRadar3D(M5Canvas& g, int cx, int cy, int rx, int ry) {
 // discharge curve. We don't rely on M5Unified's `getBatteryLevel()` —
 // its built-in mapping under-reports on the Cardputer's single-cell pack.
 // Returns -1 if the voltage probe isn't available (renders as "?%").
-inline int readBatteryPercent() {
-  int32_t mV = M5Cardputer.Power.getBatteryVoltage();
+inline int batteryPercentFromMv(int32_t mV) {
   if (mV <= 0) return -1;
 
   static const struct { int16_t mV; int8_t pct; } curve[] = {
@@ -72,6 +71,21 @@ inline int readBatteryPercent() {
     }
   }
   return 0;
+}
+
+// The footer draws every frame, but the battery only needs a look every
+// couple of seconds — the ADC read isn't free, and averaging successive
+// samples keeps the percentage from jittering between frames.
+inline int readBatteryPercent() {
+  static uint32_t lastMs = 0;
+  static float    avg    = -1.0f;
+  uint32_t now = millis();
+  if (avg >= 0.0f && now - lastMs < 2000u) return (int)(avg + 0.5f);
+  lastMs = now;
+  int pct = batteryPercentFromMv(M5Cardputer.Power.getBatteryVoltage());
+  if (pct < 0) { avg = -1.0f; return -1; }
+  avg = (avg < 0.0f) ? (float)pct : avg * 0.7f + (float)pct * 0.3f;
+  return (int)(avg + 0.5f);
 }
 
 inline void drawFooter(M5Canvas& g, const GameState& s) {

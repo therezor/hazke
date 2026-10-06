@@ -130,13 +130,20 @@ system always looks the same.
 
 ### Free flight
 
-The cockpit shows a starfield, HUD bars (shield, hull, heat,
-throttle, laser cooldown), a 3D radar of nearby ships and POIs, and a
-mode banner stack for contextual prompts (`H=HAIL`, `BELT`, `WARP`,
-`ENTER GATE`, `HEAT!`). Landing on a planet and jumping at a gate are
-automatic — drift into range and the screen hand-off fires itself.
+The cockpit shows a sky of fixed distant stars and drifting space
+dust (both move exactly with the world — the dust only streams past
+when you are actually moving), HUD bars (shield, hull, heat, throttle,
+laser cooldown), a 3D radar of nearby ships and POIs, and a mode banner
+stack for contextual prompts (`H=HAIL`, `BELT`, `WARP`, `ENTER GATE`,
+`HEAT!`). Landing on a planet and jumping at a gate are automatic —
+drift into range and the screen hand-off fires itself.
 
 Pressing `Tab` cycles a target POI.
+
+Space has no walls. Each system's zone is a sphere 30K out from the
+star (the circle on the system map); fly past it and you are in deep
+space — target markers hide, the HUD shows your distance to the sun,
+and the radar marks the way home — until you fly back in.
 
 ### Combat
 
@@ -225,11 +232,14 @@ card shows your current tier and kills-to-next.
 
 ### Audio
 
-A PWM beeper drives small SFX through the M5Unified speaker class:
-laser zap (pitched per tier), shield hit, missile launch, ECM burst,
-dock chime, witchspace whoosh, hostility alarm, quest accept /
-complete chimes, and a denied-action buzz. Volume is fixed at 80/255;
-the engine has no mute toggle yet.
+All sound effects are synthesized at boot (filtered noise, band-limited
+oscillators, bell partials with natural decays) and mixed on separate
+speaker channels so they don't cut each other off: lasers, hits on
+shields vs hull, explosions, missiles, ECM, landing / launch /
+hyperspace, an engine hum that follows the throttle, menu ticks, trade
+"cash" pings, and cockpit warnings (lock tone, incoming-missile beeper,
+shield-down, hull-critical klaxon, sun heat). `SOUND` on the title and
+pause menus steps OFF / LOW / MED / HIGH.
 
 ---
 
@@ -258,12 +268,13 @@ NPCShip.h           in-flight roster + AI (trader / pirate / patrol)
 Combat.h            laser + missile damage resolution
 Missile.h           homing missile motion + ECM
 Particles.h         tiny pixel explosion / debris system
-Audio.h             PWM SFX wrappers
+Audio.h             SFX synthesizer, mixer channels, engine hum
 SDCard.h            shared lazy microSD bring-up (screenshots + saves)
 SaveFormat.h        versioned save payloads + CRC + upgrade transformers
 SaveStore.h         save-slot IO on LittleFS/SD + game<->payload marshalling
 Ship3D.h            wireframe ship renderer (6 hull silhouettes)
-Starfield.h         parallax stars
+Starfield.h         hyperspace tunnel stars
+Sky.h               in-flight distant stars + space dust
 Cockpit.h           HUD overlay (bars, banners, rank toast)
 SystemFlight.h      the actual 3D flight loop + landing-range checks
 

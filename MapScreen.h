@@ -24,7 +24,8 @@ enum class SelType : uint8_t { POI, NPC };
 struct Item {
   SelType  type;
   int      idx;        // POI index or NPC slot
-  int16_t  wx, wz;     // cached world XZ for plotting
+  float    wx, wz;     // cached world XZ for plotting (NPCs can roam far
+                       // past int16 range now that space is open)
   uint16_t color;
 };
 
@@ -43,10 +44,10 @@ constexpr int PlotCX = Config::ScreenW / 2;
 constexpr int PlotCY = (PlotY0 + PlotY1) / 2;
 constexpr int PlotR  = 40;        // half-width of the plot area in pixels
 
-// World→plot scale. SystemHalfExtent is 24000 sysu, so the outermost POI
-// stays inside the plot disk.
+// World→plot scale. The plot disk is the system's zone (ZoneRadius), so
+// every POI sits inside it and the circle marks where deep space begins.
 inline float plotScale() {
-  return (float)PlotR / (float)SolarSystem::SystemHalfExtent;
+  return (float)PlotR / SolarSystem::ZoneRadius;
 }
 
 inline uint16_t poiColor(const SolarSystem::POI& p) {
@@ -64,13 +65,12 @@ inline void rebuildItems() {
     const auto& p = SystemFlight::layout.poi[i];
     if (p.type == SolarSystem::POIType::Station) continue;   // stations removed
     if (p.type == SolarSystem::POIType::Star) continue;      // star drawn separately, not selectable
-    items[numItems++] = { SelType::POI, i, p.x, p.z, poiColor(p) };
+    items[numItems++] = { SelType::POI, i, (float)p.x, (float)p.z, poiColor(p) };
   }
   for (int i = 0; i < NPCShip::MaxNPCs && numItems < MaxItems; i++) {
     const auto& sh = NPCShip::ships[i];
     if (!sh.active) continue;
-    items[numItems++] = { SelType::NPC, i, (int16_t)sh.wx, (int16_t)sh.wz,
-                          sh.color };
+    items[numItems++] = { SelType::NPC, i, sh.wx, sh.wz, sh.color };
   }
   if (cursor >= numItems) cursor = numItems > 0 ? numItems - 1 : 0;
   if (cursor < 0)         cursor = 0;
@@ -123,11 +123,18 @@ inline void markSelected() {
   }
 }
 
-// World XZ → screen pixel.
-inline void worldToPlot(float wx, float wz, int& sx, int& sy) {
+// World XZ → screen pixel. Anything beyond the zone is pinned to the
+// zone circle along its true bearing, so far ships and a deep-space
+// player still show which way they lie. Returns false if it was pinned.
+inline bool worldToPlot(float wx, float wz, int& sx, int& sy) {
   float k = plotScale();
-  sx = PlotCX + (int)(wx * k);
-  sy = PlotCY + (int)(wz * k);
+  float px = wx * k, pz = wz * k;
+  float r = sqrtf(px * px + pz * pz);
+  bool inside = (r <= (float)PlotR);
+  if (!inside) { px *= (float)PlotR / r; pz *= (float)PlotR / r; }
+  sx = PlotCX + (int)px;
+  sy = PlotCY + (int)pz;
+  return inside;
 }
 
 inline const char* npcRoleName(NPCShip::Role r) {
@@ -205,11 +212,12 @@ inline void draw(M5Canvas& g, const GameState& /*gs*/) {
   g.drawRect(PlotCX - PlotR - 2, PlotY0,
              (PlotR + 2) * 2, PlotY1 - PlotY0, MenuUI::SepColor);
 
-  // Faint axis crosshairs through the star.
+  // Faint axis crosshairs through the star, and the zone boundary.
   g.drawFastHLine(PlotCX - PlotR, PlotCY,
                   PlotR * 2 + 1, 0x2104);
   g.drawFastVLine(PlotCX, PlotY0 + 2,
                   PlotY1 - PlotY0 - 4, 0x2104);
+  g.drawCircle(PlotCX, PlotCY, PlotR, 0x2945);
 
   // Star sits at world origin, drawn here (not part of selectable items)
   // so the cursor can never land on it.
@@ -228,11 +236,7 @@ inline void draw(M5Canvas& g, const GameState& /*gs*/) {
   for (int i = 0; i < numItems; i++) {
     const Item& it = items[i];
     int sx, sy;
-    worldToPlot((float)it.wx, (float)it.wz, sx, sy);
-    if (sx < PlotCX - PlotR) sx = PlotCX - PlotR;
-    if (sx > PlotCX + PlotR) sx = PlotCX + PlotR;
-    if (sy < PlotY0 + 1)     sy = PlotY0 + 1;
-    if (sy > PlotY1 - 2)     sy = PlotY1 - 2;
+    worldToPlot(it.wx, it.wz, sx, sy);
 
     if (it.type == SelType::POI) {
       g.fillRect(sx - 1, sy - 1, 3, 3, it.color);
@@ -245,11 +249,7 @@ inline void draw(M5Canvas& g, const GameState& /*gs*/) {
   if (numItems > 0) {
     const Item& sel = items[cursor];
     int sx, sy;
-    worldToPlot((float)sel.wx, (float)sel.wz, sx, sy);
-    if (sx < PlotCX - PlotR) sx = PlotCX - PlotR;
-    if (sx > PlotCX + PlotR) sx = PlotCX + PlotR;
-    if (sy < PlotY0 + 1)     sy = PlotY0 + 1;
-    if (sy > PlotY1 - 2)     sy = PlotY1 - 2;
+    worldToPlot(sel.wx, sel.wz, sx, sy);
     int r = 4;
     // Cursor bracket: cyan when hovering a fresh target, yellow when
     // the cursor is sitting on the currently-marked target so ENTER's
@@ -266,20 +266,25 @@ inline void draw(M5Canvas& g, const GameState& /*gs*/) {
   }
 
   // Player position marker — a plus that blinks between bright white and
-  // dim grey so it stands out from the static POI / NPC dots.
+  // dim grey so it stands out from the static POI / NPC dots, with a
+  // short tick along the ship's heading. In deep space it sits on the
+  // zone circle in the direction the player is.
   {
     int sx, sy;
     worldToPlot(SystemFlight::state.px, SystemFlight::state.pz, sx, sy);
-    if (sx >= PlotCX - PlotR && sx <= PlotCX + PlotR &&
-        sy >= PlotY0 + 1     && sy <= PlotY1 - 2) {
-      bool bright = ((millis() / 400u) & 1u) == 0u;
-      uint16_t col = bright ? TFT_WHITE : 0x39E7;  // dim grey
-      g.drawPixel(sx,     sy,     col);
-      g.drawPixel(sx - 1, sy,     col);
-      g.drawPixel(sx + 1, sy,     col);
-      g.drawPixel(sx,     sy - 1, col);
-      g.drawPixel(sx,     sy + 1, col);
+    bool bright = ((millis() / 400u) & 1u) == 0u;
+    uint16_t col = bright ? TFT_WHITE : 0x39E7;  // dim grey
+    float hx = SystemFlight::state.fx, hz = SystemFlight::state.fz;
+    float hl = sqrtf(hx * hx + hz * hz);
+    if (hl > 0.2f) {   // skip when pointing nearly straight up / down
+      g.drawLine(sx, sy, sx + (int)(hx / hl * 6.0f), sy + (int)(hz / hl * 6.0f),
+                 TFT_CYAN);
     }
+    g.drawPixel(sx,     sy,     col);
+    g.drawPixel(sx - 1, sy,     col);
+    g.drawPixel(sx + 1, sy,     col);
+    g.drawPixel(sx,     sy - 1, col);
+    g.drawPixel(sx,     sy + 1, col);
   }
 
   // Info strip.

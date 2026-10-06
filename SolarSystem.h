@@ -22,7 +22,11 @@ using Galaxy::lcg;  // shared LCG; defined in Galaxy.h.
 
 constexpr int   MaxPOIs   = 12;       // 1 star + 3 planets + 1 station + 1 gate + slop
 constexpr int   MaxPlanets = 3;
-constexpr int16_t SystemHalfExtent = 24000;  // half-side of bounding cube, sysu
+// Radius of the system's zone around the star, sysu. Space itself is
+// open — this is where the system "ends": the map is drawn to it, and
+// past it the cockpit treats the player as being in deep space. Leaves
+// a good margin past the outermost body (~22.3K) and the gate (~20.9K).
+constexpr float ZoneRadius = 30000.0f;
 
 enum class POIType : uint8_t {
   Star = 0,
@@ -105,7 +109,7 @@ inline void layoutFor(int idx, Layout& out) {
   int numPlanets = 1 + (int)(lcg(s) % MaxPlanets);   // 1..3
 
   // Pre-chosen orbit radii so planets don't collide. Innermost sits
-  // outside the star's heat band; outer two stay inside SystemHalfExtent.
+  // outside the star's heat band; outer two stay well inside ZoneRadius.
   const int16_t orbits[MaxPlanets] = { 8000, 13500, 19500 };
 
   int firstPlanetPOI = -1;  // index into out.poi[] of planet 0 (used to

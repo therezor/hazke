@@ -6,6 +6,7 @@
 #include "MenuUI.h"
 #include "Quest.h"
 #include "Galaxy.h"
+#include "Audio.h"
 
 // In-game pause menu. Triggered by ESC from SystemFlight; covers the
 // frame with a dimmed overlay so the player still sees a hint of the
@@ -25,7 +26,7 @@ enum : int {
 inline const char* items[] = {
   "RESUME",
   "MAP",
-  "SOUND",        // label resolved at draw time from Audio::muted
+  "SOUND",        // label resolved at draw time from Audio::level
   "CONTROLS",
   "EXIT TO MENU",
 };
@@ -76,7 +77,7 @@ inline void draw(M5Canvas& g, float phase) {
   const int firstY = 36;
   for (int i = 0; i < N; i++) {
     const char* label = items[i];
-    if (i == ItemSound) label = Audio::muted ? "SOUND: OFF" : "SOUND: ON";
+    if (i == ItemSound) label = Audio::soundLabel(i == selected);
     MenuUI::drawBigMenuItem(g, firstY + i * itemH, label,
                             i == selected, phase);
   }
