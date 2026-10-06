@@ -3,49 +3,69 @@
 #include <M5GFX.h>
 #include "Config.h"
 #include "GameState.h"
+#include "Radar.h"
+#include "Rocket.h"
 
 namespace Cockpit {
 
-// Compact labeled bar: small label on the left, gauge on the right.
-inline void drawBar(M5Canvas& g, int x, int y, int w, int h,
-                    float val, uint16_t color, const char* label) {
-  if (val < 0.0f) val = 0.0f;
-  if (val > 1.0f) val = 1.0f;
-  g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  g.setTextSize(1);
-  g.setCursor(x, y - 1);
-  g.print(label);
-  int gx = x + 14;
-  int gw = w - 14;
-  g.drawRect(gx, y, gw, h, TFT_DARKGREY);
-  int fill = (int)(val * (gw - 2));
-  if (fill > 0) g.fillRect(gx + 1, y + 1, fill, h - 2, color);
+// Gauge geometry shared by both columns: 2-letter label, then an LED
+// strip of Segs blocks. Rows sit RowGap apart from the top of the strip.
+constexpr int LabelW = 14;
+constexpr int Segs   = 10;
+constexpr int SegW   = 3;    // lit block; 1 px gap after each
+constexpr int BarH   = 5;
+constexpr int BarW   = LabelW + Segs * (SegW + 1) - 1;
+constexpr int RowGap = 9;
+constexpr int Row0   = Config::HudY + 2;
+constexpr int LeftX  = 4;
+constexpr int RightX = Config::ScreenW - BarW - 4;
+constexpr uint16_t cSegOff = 0x18E3;   // unlit block
+
+inline bool blink(uint32_t periodMs = 250) {
+  return ((millis() / periodMs) & 1u) == 0u;
 }
 
-// Elite-style 3D scanner: an elliptical "scope plane" with concentric
-// distance rings, suggesting a tilted disk floating in front of the pilot.
-inline void drawRadar3D(M5Canvas& g, int cx, int cy, int rx, int ry) {
-  const uint16_t cRim   = 0x07E0; // bright green
-  const uint16_t cRing  = 0x0420; // mid green
-  const uint16_t cCross = 0x0260; // dim green
+inline void drawLabel(M5Canvas& g, int x, int y, const char* label, bool warn) {
+  g.setTextSize(1);
+  g.setTextColor(warn && blink() ? TFT_RED : TFT_LIGHTGREY, TFT_BLACK);
+  g.setCursor(x, y - 1);
+  g.print(label);
+}
 
-  // Concentric rings (outer-to-inner)
-  g.drawEllipse(cx, cy, rx,         ry,         cRim);
-  g.drawEllipse(cx, cy, rx * 2 / 3, ry * 2 / 3, cRing);
-  g.drawEllipse(cx, cy, rx / 3,     ry / 3,     cCross);
+// Segmented LED gauge. The block the value ends in lights at half
+// brightness once it's a quarter full, so small changes (a laser hit on
+// the shield) still show. `warn` blinks the label red.
+inline void drawBar(M5Canvas& g, int x, int y, float val, uint16_t color,
+                    const char* label, bool warn = false) {
+  if (val < 0.0f) val = 0.0f;
+  if (val > 1.0f) val = 1.0f;
+  drawLabel(g, x, y, label, warn);
+  float f = val * Segs;
+  int full = (int)f;
+  uint16_t half = (color >> 1) & 0x7BEF;
+  for (int i = 0; i < Segs; i++) {
+    uint16_t c = i < full                         ? color
+               : (i == full && f - full >= 0.25f) ? half
+               :                                    cSegOff;
+    g.fillRect(x + LabelW + i * (SegW + 1), y, SegW, BarH, c);
+  }
+}
 
-  // Crosshair lines across the scope plane
-  g.drawFastHLine(cx - rx, cy, 2 * rx + 1, cCross);
-  g.drawFastVLine(cx, cy - ry, 2 * ry + 1, cCross);
-
-  // Cardinal tick marks (brighter so the rim reads as a real edge)
-  g.drawPixel(cx, cy - ry - 1, TFT_GREEN);
-  g.drawPixel(cx, cy + ry + 1, TFT_GREEN);
-  g.drawPixel(cx - rx - 1, cy, TFT_GREEN);
-  g.drawPixel(cx + rx + 1, cy, TFT_GREEN);
-
-  // Center dot (own ship reference)
-  g.fillRect(cx - 1, cy - 1, 3, 3, TFT_GREEN);
+// Instrument bay around the scanner: the panel edge bends down into a
+// recess whose walls lean in, as if the scope sits lower in the console.
+inline void drawBay(M5Canvas& g) {
+  const uint16_t cPanel = TFT_DARKGREY;
+  const uint16_t cWall  = 0x2945;
+  const int y0 = Config::HudY - 1;
+  const int y1 = Config::ScreenH - 1;
+  const int xl = Radar::BayX0 - 2, xr = Radar::BayX1 + 2;
+  g.drawFastHLine(0, y0, xl - 2, cPanel);
+  g.drawFastHLine(xr + 3, y0, Config::ScreenW - xr - 3, cPanel);
+  g.drawLine(xl - 2, y0, xl, y0 + 2, cPanel);
+  g.drawLine(xr + 2, y0, xr, y0 + 2, cPanel);
+  g.drawFastHLine(xl + 1, y0 + 2, xr - xl - 1, cWall);
+  g.drawLine(xl, y0 + 2, xl + 3, y1, cWall);
+  g.drawLine(xr, y0 + 2, xr - 3, y1, cWall);
 }
 
 // Read the Cardputer's Li-Po voltage and convert via a piecewise-linear
@@ -90,7 +110,10 @@ inline int readBatteryPercent() {
 
 inline void drawFooter(M5Canvas& g, const GameState& s) {
   const int y = Config::FooterY;
-  g.drawFastHLine(0, y - 1, Config::ScreenW, TFT_DARKGREY);
+  // Divider under each gauge column; the radar bay runs on down between.
+  g.drawFastHLine(0, y - 1, Radar::BayX0 - 1, TFT_DARKGREY);
+  g.drawFastHLine(Radar::BayX1 + 2, y - 1,
+                  Config::ScreenW - Radar::BayX1 - 2, TFT_DARKGREY);
 
   // Credits, left-aligned (Elite-style decicredits)
   g.setTextSize(1);
@@ -125,60 +148,54 @@ inline void draw(M5Canvas& g, const GameState& s) {
   g.drawFastVLine(cx, cy - 6, 5, TFT_DARKGREEN);
   g.drawFastVLine(cx, cy + 2, 5, TFT_DARKGREEN);
 
-  // HUD divider
-  g.drawFastHLine(0, Config::HudY - 1, Config::ScreenW, TFT_DARKGREY);
+  drawBay(g);
 
-  // Bar layout — 3 bars left, 2 bars right, radar centered.
-  const int barH = 5;
-  const int gap  = 9;
-  const int barW = 58;
-
-  // Left column: SH (shield) and HU (hull). One shield only now.
-  const int lx = 4;
-  const int ly = Config::HudY + 2;
+  // Left column: shields, hull, hull heat.
   uint16_t hullCol = s.hull > 0.66f ? TFT_GREEN
                    : s.hull > 0.33f ? TFT_YELLOW
                    :                  TFT_RED;
-  drawBar(g, lx, ly + 0 * gap, barW, barH, s.shield, TFT_CYAN, "SH");
-  drawBar(g, lx, ly + 1 * gap, barW, barH, s.hull,   hullCol,  "HU");
+  drawBar(g, LeftX, Row0 + 0 * RowGap, s.shield, TFT_CYAN, "SH");
+  drawBar(g, LeftX, Row0 + 1 * RowGap, s.hull,   hullCol,  "HU",
+          s.hull < 0.25f);
+  // Same bands as SystemFlight's sun heat: warn .25, burning .55.
+  uint16_t heatCol = s.hullHeat >= 0.55f ? TFT_RED
+                   : s.hullHeat >= 0.25f ? TFT_ORANGE
+                   :                       0x8200;   // dull amber
+  drawBar(g, LeftX, Row0 + 2 * RowGap, s.hullHeat, heatCol, "HT",
+          s.hullHeat >= 0.55f);
 
-  // Right column: SP bar + missile counter row, vertically aligned to
-  // mirror the two-bar left column.
-  const int rx = Config::ScreenW - barW - 4;
-  const int ry = Config::HudY + 2;
-  drawBar(g, rx, ry, barW, barH, s.speed, TFT_GREEN, "SP");
+  // Right column: throttle, missile rack, ECM.
+  drawBar(g, RightX, Row0, s.speed, TFT_GREEN, "SP");
 
-  // Missile rack directly under SP — one small dart icon per loaded
-  // missile (4-slot rack). Lit yellow when loaded, dim outline when the
-  // slot is empty, so the rack reads at a glance.
+  // Missile rack — a little rocket per loaded missile (4-slot rack);
+  // empty slots keep a dim silhouette so the rack reads at a glance.
   {
-    int my = ry + gap;
-    g.setTextSize(1);
-    g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    g.setCursor(rx, my - 1);
-    g.print("MS");
-    // Icon: 5×5 right-pointing dart. Base on the left, tip on the right.
-    const int iconW = 5, iconH = 5, gapX = 3;
-    int sx = rx + 14;
-    int sy = my;
+    int my = Row0 + RowGap;
+    drawLabel(g, RightX, my, "MS", false);
     for (int i = 0; i < 4; i++) {
-      int ix = sx + i * (iconW + gapX);
-      if (i < (int)s.missiles) {
-        g.fillTriangle(ix,            sy,
-                       ix,            sy + iconH - 1,
-                       ix + iconW - 1, sy + iconH / 2,
-                       TFT_YELLOW);
-      } else {
-        g.drawTriangle(ix,            sy,
-                       ix,            sy + iconH - 1,
-                       ix + iconW - 1, sy + iconH / 2,
-                       TFT_DARKGREY);
-      }
+      Rocket::drawIcon(g, RightX + LabelW + i * 10, my, i < (int)s.missiles);
     }
   }
 
-  // 3D scanner in the middle
-  drawRadar3D(g, Config::ScreenW / 2, Config::HudY + 14, 26, 11);
+  // ECM: READY, seconds left on the recharge, or "--" when not fitted.
+  {
+    int ey = Row0 + 2 * RowGap;
+    drawLabel(g, RightX, ey, "EC", false);
+    g.setCursor(RightX + LabelW, ey - 1);
+    int cd = (int)(s.ecmCooldown + 0.99f);
+    if (!s.ecm) {
+      g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      g.print("--");
+    } else if (cd > 0) {
+      g.setTextColor(0x8400, TFT_BLACK);
+      g.printf("%ds", cd);
+    } else {
+      g.setTextColor(TFT_YELLOW, TFT_BLACK);
+      g.print("READY");
+    }
+  }
+
+  Radar::drawScope(g);
 
   // Footer
   drawFooter(g, s);

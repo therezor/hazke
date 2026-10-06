@@ -133,11 +133,18 @@ system always looks the same.
 
 The cockpit shows a sky of fixed distant stars and drifting space
 dust (both move exactly with the world — the dust only streams past
-when you are actually moving), HUD bars (shield, hull, heat, throttle,
-laser cooldown), a 3D radar of nearby ships and POIs, and a mode banner
+when you are actually moving), segmented gauges (shield, hull, heat,
+throttle), the missile rack and ECM status, a 3D scanner, and a mode banner
 stack for contextual prompts (`H=HAIL`, `BELT`, `WARP`, `ENTER GATE`,
 `HEAT!`). Landing on a planet and jumping at a gate are automatic —
 drift into range and the screen hand-off fires itself.
+
+The scanner is a disk seen in perspective: ahead is the far side,
+behind is the near side, and the bright wedge is what the viewport
+can see. Each contact stands on a stalk from its spot on the disk —
+up for above you, dotted down for below. The range scale is
+logarithmic (rings at 2.5K and 10K, rim at the 30K zone edge), so
+ships in a dogfight spread out instead of piling up on the center.
 
 Pressing `Tab` cycles a target POI.
 
@@ -158,7 +165,7 @@ and the radar marks the way home — until you fly back in.
 - **Autolock** (300 CR) steers the nose onto the current marker — a
   ship from `Tab` / `R`, or a planet / gate from `Tab` or the map.
   `F` toggles it; with nothing marked it grabs whatever is closest to
-  the nose. `AUTO` blinks in the footer while it turns and goes steady
+  the nose. `AUTO` blinks above the scanner while it turns and goes steady
   green once on target. Holding pitch / yaw overrides it, roll stays
   yours, and throttle is always manual. Routes that would cross the
   sun's heat band curve around it. It drops when the target dies, on
@@ -285,7 +292,9 @@ SaveStore.h         save-slot IO on LittleFS/SD + game<->payload marshalling
 Ship3D.h            wireframe ship renderer (6 hull silhouettes)
 Starfield.h         hyperspace tunnel stars
 Sky.h               in-flight distant stars + space dust
-Cockpit.h           HUD overlay (bars, banners, rank toast)
+Cockpit.h           HUD panel (gauges, missile rack, ECM, footer)
+Radar.h             perspective 3D scanner + contact blips
+Rocket.h            missile art (rack icon, in-flight rocket)
 SystemFlight.h      the actual 3D flight loop + landing-range checks
 
 TitleScreen.h       title menu

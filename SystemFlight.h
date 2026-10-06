@@ -14,6 +14,8 @@
 #include "Faction.h"
 #include "Rank.h"
 #include "Audio.h"
+#include "Radar.h"
+#include "Rocket.h"
 
 // Refit R11: in-system free flight.
 //
@@ -1590,94 +1592,55 @@ inline void renderWorld(M5Canvas& g) {
   }
 }
 
-// Cockpit-radar blips. Plots non-star POIs as colored dots on the
-// elliptical 3D scanner that Cockpit::drawRadar3D already draws. POIs are
-// placed by their direction relative to the player's heading (so the
-// target ahead of you shows at the top of the scope), at a radial offset
-// proportional to distance up to RadarRange. The little vertical line is
-// the Elite-style altitude bar — positive cy (above plane) draws upward.
-constexpr float RadarRange = SolarSystem::ZoneRadius;   // sysu, the whole zone
-constexpr int   RadarCX    = Config::ScreenW / 2;
-constexpr int   RadarCY    = Config::HudY + 14;
-constexpr int   RadarRX    = 26;
-constexpr int   RadarRY    = 11;
+// Cockpit-radar contacts: every non-star POI, NPC ship and in-flight
+// missile, fed to Radar (Radar.h) by camera-space offset so ahead is the
+// far side of the scope. The camera transform is the viewport's minus the
+// near-plane cull, so contacts behind the ship land on the near half.
+static_assert(Radar::Range == SolarSystem::ZoneRadius,
+              "scope rim should sit on the zone edge");
 
 inline void renderRadarBlips(M5Canvas& g) {
-  // Same camera transform as the viewport but without the near-plane
-  // cull, so POIs behind the ship show on the bottom of the scope.
   syncCamera();
-  // POI blip with its Elite-style altitude bar (sysu per pixel).
-  auto poiBlip = [&](const SolarSystem::POI& p, uint16_t col) {
+  Radar::clear();
+  auto addAt = [](float wx, float wy, float wz, uint16_t col,
+                  uint8_t kind, uint8_t flags) {
     float cx, cy, cz;
-    camSpace((float)p.x - state.px, (float)p.y - state.py,
-             (float)p.z - state.pz, cx, cy, cz);
-    float horiz = sqrtf(cx*cx + cz*cz);
-    if (horiz < 1.0f) return;
-    float dNorm = horiz / RadarRange;
-    if (dNorm > 1.0f) dNorm = 1.0f;
-    int bx = RadarCX + (int)((cx / horiz) * (RadarRX - 1) * dNorm);
-    int by = RadarCY - (int)((cz / horiz) * (RadarRY - 1) * dNorm);
-    int v = (int)(cy / 1800.0f);
-    if (v >  6) v =  6;
-    if (v < -6) v = -6;
-    if (v != 0) {
-      int y0 = by, y1p = by - v;
-      if (y0 > y1p) { int t = y0; y0 = y1p; y1p = t; }
-      g.drawFastVLine(bx, y0, y1p - y0 + 1, col);
-    }
-    g.fillRect(bx - 1, by - 1, 3, 3, col);
+    camSpace(wx - state.px, wy - state.py, wz - state.pz, cx, cy, cz);
+    Radar::add(cx, cy, cz, col, kind, flags);
   };
+
   int starI = -1;
   for (int i = 0; i < layout.numPOIs; i++) {
     const auto& p = layout.poi[i];
     if (p.type == SolarSystem::POIType::Star) { starI = i; continue; }
-    poiBlip(p, (i == state.targetIdx && !state.outOfZone) ? TFT_WHITE
-                                                          : poiColor(p));
+    bool marked = i == state.targetIdx && !state.outOfZone;
+    addAt((float)p.x, (float)p.y, (float)p.z,
+          marked ? TFT_WHITE : poiColor(p), Radar::Body,
+          marked ? Radar::FMarked : 0);
   }
   // Inside the system the star is the scope's frame of reference; out in
-  // deep space it becomes the home blip on the rim, drawn last so the
-  // planet blips clustered on the same bearing can't cover it.
-  if (state.outOfZone && starI >= 0) poiBlip(layout.poi[starI], TFT_YELLOW);
+  // deep space it becomes the blinking home blip on the rim.
+  if (state.outOfZone && starI >= 0) {
+    const auto& p = layout.poi[starI];
+    addAt((float)p.x, (float)p.y, (float)p.z, TFT_YELLOW, Radar::Home, 0);
+  }
 
-  // R16: NPC ships as 1-pixel blips in the ship's own color (no vert bar
-  // — they're typically close to the player's altitude). Stays within
-  // the radar ellipse via the same dNorm clamp.
   if (NPCShip::loadedSys == state.loadedSys) {
     for (int i = 0; i < NPCShip::MaxNPCs; i++) {
       const auto& sh = NPCShip::ships[i];
       if (!sh.active) continue;
-      float cx, cy, cz;
-      camSpace(sh.wx - state.px, sh.wy - state.py, sh.wz - state.pz,
-               cx, cy, cz);
-      float horiz = sqrtf(cx * cx + cz * cz);
-      if (horiz < 1.0f) continue;
-      float dNorm = horiz / RadarRange;
-      if (dNorm > 1.0f) dNorm = 1.0f;
-      int bx = RadarCX + (int)((cx / horiz) * (RadarRX - 1) * dNorm);
-      int by = RadarCY - (int)((cz / horiz) * (RadarRY - 1) * dNorm);
-      // R21: box the locked NPC's blip so the player can spot it even
-      // when the silhouette is off-screen.
-      if (i == state.lockedNPC) g.drawRect(bx - 1, by - 1, 4, 4, TFT_WHITE);
-      // Green friendly / red hostile, 2×2 so it reads over the rings.
-      g.fillRect(bx, by, 2, 2, shipMarkerColor(i));
+      addAt(sh.wx, sh.wy, sh.wz, shipMarkerColor(i), Radar::Ship,
+            i == state.lockedNPC ? Radar::FLocked : 0);
     }
   }
 
-  // R21: in-flight missiles as their own blips so the player can see
-  // incoming threats on the scope.
   for (int i = 0; i < Missile::MaxMissiles; i++) {
     const auto& m = Missile::pool[i];
     if (!m.active) continue;
-    float cx, cy, cz;
-    camSpace(m.wx - state.px, m.wy - state.py, m.wz - state.pz, cx, cy, cz);
-    float horiz = sqrtf(cx * cx + cz * cz);
-    if (horiz < 1.0f) continue;
-    float dNorm = horiz / RadarRange;
-    if (dNorm > 1.0f) dNorm = 1.0f;
-    int bx = RadarCX + (int)((cx / horiz) * (RadarRX - 1) * dNorm);
-    int by = RadarCY - (int)((cz / horiz) * (RadarRY - 1) * dNorm);
-    g.drawPixel(bx, by, m.color);
+    addAt(m.wx, m.wy, m.wz, m.color, Radar::Missile, 0);
   }
+
+  Radar::drawBlips(g);
 }
 
 // Top-left HUD line: target POI name and distance. Color shifts to cyan
@@ -1742,20 +1705,8 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     g.print(buf);
   }
 
-  // Top-right corner — ECM status only. Missile count now lives in the
-  // HUD bar strip under SP, so it isn't repeated here.
-  if (gs.ecm) {
-    char arm[8];
-    int  armLen;
-    int  cd = (int)(gs.ecmCooldown + 0.99f);
-    if (cd <= 0) armLen = snprintf(arm, sizeof(arm), "E");
-    else         armLen = snprintf(arm, sizeof(arm), "%ds", cd);
-    g.setTextColor(TFT_YELLOW, TFT_BLACK);
-    g.setCursor(Config::ScreenW - armLen * 6 - 3, 3);
-    g.print(arm);
-  }
-
-  // R21: lock readout below the missile line — name of the locked NPC.
+  // R21: lock readout, top-right — role of the locked NPC. (ECM status
+  // lives in the gauge panel now.)
   if (state.lockedNPC >= 0 && state.lockedNPC < NPCShip::MaxNPCs &&
       NPCShip::ships[state.lockedNPC].active) {
     const auto& sh = NPCShip::ships[state.lockedNPC];
@@ -1765,7 +1716,7 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
                                            : "LOCK TRADER";
     int len = (int)strlen(tag);
     g.setTextColor(shipMarkerColor(state.lockedNPC), TFT_BLACK);
-    g.setCursor(Config::ScreenW - len * 6 - 3, 13);
+    g.setCursor(Config::ScreenW - len * 6 - 3, 3);
     g.print(tag);
   }
 
@@ -1822,16 +1773,19 @@ inline void renderHUD(M5Canvas& g, const GameState& gs, float dist) {
     g.print(tag);
   }
 
-  // Autolock engaged: AUTO in the footer gap between CR and BAT, and the
-  // reticle re-tinted. Blinking cyan while the nose swings onto the
-  // target, steady green once it's on.
+  // Autolock engaged: AUTO at the bottom of the viewport, just above the
+  // radar bay, and the reticle re-tinted. Blinking cyan while the nose
+  // swings onto the target, steady green once it's on.
   if (state.autoLock) {
     bool on = autoAligned();
     bool show = on || ((millis() / 250u) & 1u) == 0u;
     uint16_t col = on ? TFT_GREEN : TFT_CYAN;
     if (show) {
-      g.setTextColor(col, TFT_BLACK);
-      g.setCursor((Config::ScreenW - 4 * 6) / 2, Config::FooterY + 1);
+      // No background box — the bottom-centre edge arrow for a target
+      // astern sits right here while autolock swings onto it.
+      g.setTextColor(col);
+      g.setCursor((Config::ScreenW - 4 * 6) / 2,
+                  Config::ViewY + Config::ViewH - 11);
       g.print("AUTO");
     }
     int cx = Config::ViewX + Config::ViewW / 2;
@@ -2252,27 +2206,30 @@ inline void renderLasers(M5Canvas& g) {
   }
 }
 
-// R21: project missiles as short streaks — a head dot plus a tail
-// segment pointing back along the velocity vector. Player missiles render
-// yellow, NPC missiles red (set at spawn time).
+// R21: missiles drawn as little rockets (Rocket::draw) along the flight
+// path, nose/fins in the side colour set at spawn — player yellow, pirate
+// red. The tail point is the body length back along the velocity.
+constexpr float MissileBodyLen = 90.0f;   // sysu
+
 inline void renderMissiles(M5Canvas& g) {
+  uint32_t ms = millis();
   for (int i = 0; i < Missile::MaxMissiles; i++) {
     const auto& m = Missile::pool[i];
     if (!m.active) continue;
 
     int hx, hy; float czz;
     if (!project(m.wx, m.wy, m.wz, NearZ, hx, hy, czz)) continue;
-    if (hx < Config::ViewX - 8 || hx > Config::ViewX + Config::ViewW + 8) continue;
-    if (hy < Config::ViewY - 8 || hy > Config::ViewY + Config::ViewH + 8) continue;
+    if (hx < Config::ViewX - 12 || hx > Config::ViewX + Config::ViewW + 12) continue;
+    if (hy < Config::ViewY - 12 || hy > Config::ViewY + Config::ViewH + 12) continue;
 
-    // Tail = head minus a tiny step back along velocity in world space.
-    int tlx, tly; float tczz;
-    if (project(m.wx - m.vx * 0.05f, m.wy - m.vy * 0.05f, m.wz - m.vz * 0.05f,
-                NearZ, tlx, tly, tczz)) {
-      g.drawLine(hx, hy, tlx, tly, m.color);
-    }
-    // Hot pixel at the head so the missile stays visible even at range.
-    g.drawPixel(hx, hy, TFT_WHITE);
+    float vl = sqrtf(m.vx * m.vx + m.vy * m.vy + m.vz * m.vz);
+    if (vl < 1e-3f) { g.drawPixel(hx, hy, TFT_WHITE); continue; }
+    float k = MissileBodyLen / vl;
+    int tx, ty; float tcz;
+    if (!project(m.wx - m.vx * k, m.wy - m.vy * k, m.wz - m.vz * k,
+                 NearZ, tx, ty, tcz)) { tx = hx; ty = hy; }
+
+    Rocket::draw(g, hx, hy, tx, ty, m.color, ms / 50u + i * 3u);
   }
 }
 
