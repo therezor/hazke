@@ -4,7 +4,7 @@
 namespace Config {
   // Release version — update here only; the title badge and About screen
   // both read from this so there's a single source of truth.
-  constexpr const char* VersionTag = "v1.2";
+  constexpr const char* VersionTag = "v1.3";
 
   // On-disk save format version. Bump ONLY when the save payload layout
   // changes, together with a new frozen SaveDataVn struct and an

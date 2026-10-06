@@ -76,7 +76,7 @@ inline void drawStat(M5Canvas& g, int x, int y, const char* k, const char* v,
   g.setCursor(x, y);
   g.print(k);
   g.setTextColor(vc, TFT_BLACK);
-  g.setCursor(x + 7 * 6, y);  // key padded to 7 chars
+  g.setCursor(x + 7 * 6, y);  // keys are at most 6 chars + a gap
   g.print(v);
 }
 
@@ -104,26 +104,26 @@ inline void draw(M5Canvas& g, int currentIdx, int targetIdx,
   const int rowH   = 11;
 
   // Left column
-  drawStat(g, leftX, row0 + 0 * rowH, "ECONOMY",
+  drawStat(g, leftX, row0 + 0 * rowH, "ECON",
            Galaxy::economyName(s.economy));
-  drawStat(g, leftX, row0 + 1 * rowH, "GOV    ",
+  drawStat(g, leftX, row0 + 1 * rowH, "GOV",
            Galaxy::govName(s.government));
   snprintf(buf, sizeof(buf), "%u", (unsigned)s.techLevel);
-  drawStat(g, leftX, row0 + 2 * rowH, "TECH LV", buf);
+  drawStat(g, leftX, row0 + 2 * rowH, "TECH", buf);
   snprintf(buf, sizeof(buf), "%u.%uB",
            (unsigned)(s.population / 10), (unsigned)(s.population % 10));
-  drawStat(g, leftX, row0 + 3 * rowH, "POP    ", buf);
+  drawStat(g, leftX, row0 + 3 * rowH, "POP", buf);
 
   // Right column
   snprintf(buf, sizeof(buf), "%ukm", (unsigned)Galaxy::systemRadius(targetIdx));
-  drawStat(g, rightX, row0 + 0 * rowH, "RADIUS ", buf);
+  drawStat(g, rightX, row0 + 0 * rowH, "RADIUS", buf);
   snprintf(buf, sizeof(buf), "%u MCr", (unsigned)s.productivity);
-  drawStat(g, rightX, row0 + 1 * rowH, "PRODUCE", buf);
+  drawStat(g, rightX, row0 + 1 * rowH, "PROD", buf);
   float d = Galaxy::distanceLY(currentIdx, targetIdx);
   if (d < 0) d = 0;
   snprintf(buf, sizeof(buf), "%d.%dLY", (int)d, ((int)(d * 10)) % 10);
   uint16_t dcol = (d < 7.0f) ? TFT_GREEN : (d < 20.0f ? TFT_YELLOW : TFT_RED);
-  drawStat(g, rightX, row0 + 2 * rowH, "DISTANCE", buf);
+  drawStat(g, rightX, row0 + 2 * rowH, "DIST", buf);
   // overwrite value with the colored variant (drawStat used WHITE)
   // — simpler: just reprint over with the right color
   g.setTextColor(dcol, TFT_BLACK);
@@ -132,7 +132,7 @@ inline void draw(M5Canvas& g, int currentIdx, int targetIdx,
 
   const char* status = (currentIdx == targetIdx) ? "HOME" : "TARGET";
   uint16_t sc = (currentIdx == targetIdx) ? TFT_GREEN : TFT_ORANGE;
-  drawStat(g, rightX, row0 + 3 * rowH, "STATUS ", status, sc);
+  drawStat(g, rightX, row0 + 3 * rowH, "STATUS", status, sc);
 
   // Flavor section
   int flavorY = row0 + 4 * rowH + 6;

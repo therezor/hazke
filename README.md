@@ -1,330 +1,209 @@
 # Hazke
 
-**Trade. Hunt. Survive.** An open-universe space sim for the M5Stack
-Cardputer, inspired by *Parkan: Imperial Chronicles* and *Galaxy on
-Fire 2*. Fly between sixteen procedurally-generated star systems, land
-on planets, run cargo or hunt pirates for one of four factions, and
-shape your standing across the galaxy — all on a 240×135 display.
+A space trading and combat game for the M5Stack Cardputer. Fly between
+sixteen star systems, trade cargo, take jobs from planets and fight
+pirates, all on a 240×135 screen.
 
-No assets or code are copied from the inspirations; the galaxy,
-commodity table, ship silhouettes and faction roster are all original.
+![Gameplay recorded on a Cardputer: landing on a planet, autolock, a pirate kill and a hyperspace jump](website/media/gameplay.gif)
 
----
+**[Download v1.3](https://github.com/therezor/hazke/releases/download/v1.3.0/hazke-v1.3.0-cardputer.bin)**
+· [All releases](https://github.com/therezor/hazke/releases)
 
-## Hardware
+Inspired by *Elite*, *Parkan: Imperial Chronicles* and *Galaxy on Fire 2*.
+All code and art are original.
 
-- **Board:** M5Stack Cardputer (ESP32-S3, ST7789 240×135 display,
-  56-key keyboard, PWM beeper).
-- Built with the Arduino IDE / Arduino CLI against the `M5Cardputer`
-  / `M5Unified` libraries.
+## Install
 
-## Build & flash
+Pick Hazke from your launcher's app list, or flash the firmware yourself.
 
-1. Open `hazke.ino` in the Arduino IDE.
-2. Install the **M5Cardputer** library via Library Manager (pulls
-   `M5Unified` and `M5GFX` automatically).
-3. Board: `M5Stack` → `M5Cardputer`. Port: whichever USB-C tty your
-   Cardputer enumerates as.
-4. Upload. The first boot drops you on the title screen.
+**Prebuilt firmware.** Download `hazke-v1.3.0-cardputer.bin` from the
+[latest release](https://github.com/therezor/hazke/releases/latest) and
+flash it with M5Burner or esptool:
 
-## Saving
+```
+esptool.py --chip esp32s3 write_flash 0x0 hazke-v1.3.0-cardputer.bin
+```
 
-The game has 5 save slots on each of two storage backends: **internal
-flash** (LittleFS on the stock `spiffs` partition, formatted on first
-use) and the **microSD card**. Saving happens while landed on a planet
-(`SAVE GAME` on the landing menu); loading (`LOAD GAME` on the title
-screen) puts you back docked at that planet. In the slot picker,
-LEFT/RIGHT switches the storage backend and `ENTER` on a slot offers
-LOAD/SAVE, COPY (backup/restore the slot to the other backend), and
-DELETE.
+This full image also clears the saves in internal flash. To keep them
+when upgrading a Cardputer that already runs Hazke, flash only the game
+from `hazke-v1.3.0-app.bin`:
 
-Save files (`/hazke/saves/slotN.sav`, ~100 bytes) carry a format
-version and a CRC. When a future release changes the format, old files
-are upgraded automatically at load time through chained transformers in
-`SaveFormat.h` — a save from any older version keeps working. Files
-written by a *newer* firmware show as `NEWER VERSION` and are left
-untouched.
+```
+esptool.py --chip esp32s3 write_flash 0x10000 hazke-v1.3.0-app.bin
+```
+
+Or copy your slots to the SD card first (save menu, `COPY`).
+
+**From source.** Install the `M5Cardputer` library in the Arduino IDE
+(it pulls in `M5Unified` and `M5GFX`), open `hazke.ino`, pick the
+`M5Cardputer` board and upload. With arduino-cli:
+
+```
+arduino-cli compile --fqbn esp32:esp32:m5stack_cardputer --upload -p <port> .
+```
+
+## New in v1.3
+
+All clips were recorded on a Cardputer.
+
+<table>
+<tr>
+<td width="50%"><img src="website/media/autolock.gif" alt="Autolock turning the ship onto a pirate"><br>
+<b>Autolock.</b> A 300 CR module. Press <code>F</code> and the ship turns onto your target, then holds it. Pitch or yaw keys override it.</td>
+<td width="50%"><img src="website/media/scanner.gif" alt="3D scanner while the ship pitches"><br>
+<b>3D scanner.</b> The scanner is a tilted disk. Each contact stands on a stalk that shows whether it's above or below you.</td>
+</tr>
+<tr>
+<td><img src="website/media/hit-arcs.gif" alt="Red hit arc on the scanner rim"><br>
+<b>Hit arcs.</b> A red arc on the scanner rim points at whoever just hit you, and follows them as you turn.</td>
+<td><img src="website/media/combat.gif" alt="Missile hit and a pirate kill"><br>
+<b>Rockets and a new cockpit.</b> Missiles fly with an exhaust trail. The gauges are segmented and the rack shows each missile.</td>
+</tr>
+<tr>
+<td><img src="website/media/system-map.gif" alt="System map with zoom"><br>
+<b>System map.</b> Bigger, with an x2 zoom on <code>F</code>. Hostile ships show red and friendly ones green, here and on the scanner.</td>
+<td><img src="website/media/deep-space.gif" alt="Flying back into a system from deep space"><br>
+<b>Open space.</b> Systems have no walls. Past 30K from the sun you are in deep space, and the HUD shows how far home is.</td>
+</tr>
+</table>
+
+Also new: every sound effect is rebuilt and mixed on separate channels,
+with a volume setting (off, low, medium, high) on the title and pause
+menus. The screen updates are double-buffered, so flight runs smoother.
+
+## How to play
+
+You start next to a jump gate with 100 credits and an empty hold.
+
+- **Trade.** Buy goods where they're cheap and sell where they're scarce.
+  Farm worlds sell food cheap and pay well for machinery, and industrial
+  worlds do the opposite. Three goods are illegal and get scarcer under
+  stable governments.
+- **Take jobs.** Land on a planet and open the job board. Jobs include
+  hunting pirates, delivering cargo, fetching goods the planet can't
+  buy locally, visiting a planet and carrying a courier package. You get paid when you return to the planet that gave
+  you the job (couriers pay on arrival).
+- **Fight.** Pirates attack on sight. Below 50% hull a ship's engines
+  drop to half power, and below 25% its weapons stop working. Fly up to
+  a beaten ship and press `H` to take its cargo.
+- **Travel.** Fly into a jump gate to open the galactic chart. Jumps go
+  only to systems linked by a gate and cost 10 CR per light year.
+- **Land.** Fly into a planet. Landing opens the market, the equipment
+  shop, the job board and the save menu.
+
+Your standing with four factions goes up and down with kills, trades
+and jobs. Patrols turn on you if a faction dislikes you enough, and
+prices shift by up to 20% either way. Kills earn a rank, from Harmless
+to Deadly.
+
+Shields recharge slowly while they hold. Once a shield drops to zero it
+stays down until you pay for a repair. Hull damage only comes off at a
+repair shop.
+
+### Equipment
+
+| Item | Price | Effect |
+|------|-------|--------|
+| Repair hull | 10 CR per 10% | Fixes hull damage |
+| Repair shield | 100 CR | Brings a downed shield back |
+| Missile | 30 CR | Homing missile, up to 4 |
+| ECM | 600 CR | Blows up nearby missiles (`Q`) |
+| Autolock | 300 CR | Turns the ship onto your target (`F`) |
+| Large hold | 400 CR | Cargo space from 20 t to 35 t |
+| Beam laser | 1000 CR | More damage and range |
+| Military laser | 6000 CR | The best laser, needs the beam laser first |
 
 ## Controls
 
-Cardputer keycaps in brackets show the arrow legend printed on the
-device.
+The arrow keys are the `;` `,` `.` `/` keys, marked with arrows on the
+Cardputer.
 
-| Key                | Action |
-|--------------------|--------|
-| `;` / `.` (↑ / ↓)  | Pitch up / down |
-| `,` / `/` (← / →)  | Roll left / right |
-| `L` / `'`          | Yaw left / right |
-| `E`                | Accelerate |
-| `S`                | Brake |
-| `W` or `Space`     | Fire laser |
-| `R`                | Cycle missile lock |
-| `A`                | Fire missile at current lock |
-| `Q`                | Fire ECM burst (if installed) |
-| `F`                | Toggle autolock (if installed) · map zoom |
-| `Tab`              | Cycle target POI |
-| `H`                | Dock with nearby ship (trade / loot) |
-| `M`                | Open local system map |
-| `Enter`            | Confirm in menus |
-| `` ` ``             | Back / pause |
+| Key | Action |
+|-----|--------|
+| `↑` `↓` | Pitch |
+| `←` `→` | Roll |
+| `L` `'` | Yaw |
+| `E` / `S` | Speed up / slow down |
+| `W` or `Space` | Fire laser |
+| `R` | Cycle missile lock through ships ahead |
+| `A` | Fire a missile |
+| `Q` | ECM |
+| `F` | Autolock, or zoom on the system map |
+| `Tab` | Next target (ships and places) |
+| `H` | Hail or loot a nearby ship |
+| `M` | System map |
+| `Enter` | Confirm |
+| `` ` `` | Back / pause |
+| `Ctrl` + `Space` | Screenshot to the SD card |
 
----
+## Saving
 
-## How it plays
+Save from the landing menu of any planet, and load from the title
+screen. There are five slots in internal flash and five on the microSD
+card, and a slot can be copied between the two. Saves from older
+versions load in newer ones. A save made by a newer version shows as
+`NEWER VERSION` and is left alone.
 
-You start in your ship at a jump gate with 100 CR and an empty hold.
-From there you can:
+v1.3 changed the save format. v1.2 saves load fine, but once you save
+a slot in v1.3, v1.2 can't read it.
 
-- **Trade.** Buy commodities cheap in their home market and sell them
-  where they're rare. Agricultural goods are cheap on farm worlds and
-  dear on industrial worlds, and vice versa. Hailing an NPC in flight
-  opens a separate buy/sell dialog with its own spread.
-- **Run quests.** Land on a planet, open its quest board, and accept
-  one of four offered contracts. Quests are local-system-only and
-  return-to-origin: you take a job at planet A, complete it somewhere
-  in the same system, and fly back to A for payment.
-- **Hunt.** Kill pirates for bounties and reputation with lawful
-  factions. Patrol quests force a fixed pirate roster to spawn after
-  launch, so the hunt is winnable even in peaceful systems. NPCs are
-  slower than you at full throttle, so you can always either outrun a
-  fight or close in on a wounded one. Damage thresholds apply to both
-  sides: below 50% hull engines drop to half thrust, below 25% hull
-  weapons go offline. A ship that's been beaten below 25% can no
-  longer shoot back — `H` then opens a loot dialog where you grab its
-  cargo for free.
-- **Travel.** Pay 10 CR per LY at a jump gate to hyperspace to a
-  neighbouring system. Only direct gate links are reachable; the
-  galaxy is a graph, not a free-distance grid.
-- **Upgrade.** Spend earnings at the EQUIP shop on missiles, an ECM,
-  a larger hold, better lasers, or hull and shield repairs.
+## Serial console
 
-Die (hull → 0) and the game-over screen offers a restart.
+With the Cardputer connected over USB, a serial terminal at 115200 baud
+accepts these commands:
 
----
+| Command | What it does |
+|---------|--------------|
+| `status` | Prints the commander, screen, credits and system |
+| `credits <CR>` | Sets your credits |
+| `save [1-5] [sd\|int]` | Saves to a slot |
+| `cap on` / `cap off` | Pauses the game so it only advances on `step` / `rec` |
+| `keys <chars>` | Holds those keys down (`T` is Tab, `N` is Enter) |
+| `step <n>` / `rec <n>` | Runs `n` frames of 1/25 s each; `rec` also sends each frame |
+| `shot` | Sends the current frame |
 
-## Game systems
+Frames go out as RGB565, run-length packed (`Capture.h` describes the
+format). `tools/capture.py` sends these commands from a computer and
+saves the frames as PNGs. The clips in this README were recorded with it.
 
-### Galaxy
+## Code
 
-Sixteen systems generated deterministically from a single LCG seed.
-Each has a name, government, economy, tech level, population, and
-productivity. A gate adjacency graph (2–4 neighbours per system, made
-symmetric) is the only path between systems — the chart screen draws
-this graph and dims any system without a direct link to your current
-location.
-
-Coordinates live in a 256×256 map; one map unit is roughly 0.1 LY,
-so a typical neighbour is 2–5 LY away.
-
-### Solar systems
-
-Each system is a 3D volume (about 48 km on a side) containing:
-
-- a star at the origin,
-- one to three planets on inclined orbits (some with rings, moonlets,
-  or asteroid belts),
-- one or more Coriolis stations,
-- a jump gate (the only way out).
-
-Layouts are re-derived on demand from the system seed, so the same
-system always looks the same.
-
-### Free flight
-
-The cockpit shows a sky of fixed distant stars and drifting space
-dust (both move exactly with the world — the dust only streams past
-when you are actually moving), segmented gauges (shield, hull, heat,
-throttle), the missile rack and ECM status, a 3D scanner, and a mode banner
-stack for contextual prompts (`H=HAIL`, `BELT`, `WARP`, `ENTER GATE`,
-`HEAT!`). Landing on a planet and jumping at a gate are automatic —
-drift into range and the screen hand-off fires itself.
-
-The scanner is a disk seen in perspective: ahead is the far side,
-behind is the near side, and the bright wedge is what the viewport
-can see. Each contact stands on a stalk from its spot on the disk —
-up for above you, dotted down for below. The range scale is
-logarithmic (rings at 2.5K and 10K, rim at the 30K zone edge), so
-ships in a dogfight spread out instead of piling up on the center.
-
-Pressing `Tab` cycles a target POI.
-
-Space has no walls. Each system's zone is a sphere 30K out from the
-star (the faint ring on the system map, zoom with `F`); fly past it and you are in deep
-space — target markers hide, the HUD shows your distance to the sun,
-and the radar marks the way home — until you fly back in.
-
-### Combat
-
-- **Lasers** come in three tiers: Pulse (start), Beam (1000 CR),
-  Military (6000 CR; requires Beam first). Each tier raises damage,
-  range, and cooldown speed.
-- **Missiles** are racked up to four. `R` cycles a lock onto the
-  nearest target in front; `A` fires.
-- **ECM** is unlimited but cooldown-throttled, blanketing incoming
-  missiles in a single burst.
-- **Autolock** (300 CR) steers the nose onto the current marker — a
-  ship from `Tab` / `R`, or a planet / gate from `Tab` or the map.
-  `F` toggles it; with nothing marked it grabs whatever is closest to
-  the nose. `AUTO` blinks above the scanner while it turns and goes steady
-  green once on target. Holding pitch / yaw overrides it, roll stays
-  yours, and throttle is always manual. Routes that would cross the
-  sun's heat band curve around it. It drops when the target dies, on
-  landing / launch, and in deep space.
-- **Shields** absorb damage first and regenerate slowly (~37 s for a
-  full top-up) **while still active** — once a shield is depleted to
-  0 it stays down until you buy `REPAIR SHIELD` at the EQUIP shop.
-  **Hull** only goes down — repair it the same way.
-- **Sun heat** builds while skimming the star. Past 1.0 hullHeat
-  forward shields drain, then aft. A `HEAT!` banner blinks faster
-  as you approach the threshold.
-
-### NPCs and factions
-
-Every system spawns 1–4 NPC ships, roles weighted by government
-(anarchy → mostly pirates; corporate → mostly patrols). Pirates are
-always Cartel; everyone else inherits the system's faction.
-
-There are four factions: **Imperium**, **Federation**, **Cartel**,
-**Free Traders**. Your standing with each runs from -100 to +100 and
-shifts on kills, trades, and quest payouts. Patrols turn hostile to
-you once their faction's standing drops past -30, and market prices
-flex up to ±20% with standing.
-
-### Market
-
-Seventeen commodities, from Food and Textiles up through Gold,
-Platinum, and Aliens. Three are illegal (Slaves, Narcotics, Firearms)
-and shrink under stable governments. Prices and stock are
-deterministic per (system, commodity, market epoch); each hyperspace
-jump bumps the epoch so prices shift slightly on a return visit.
-
-### Quests
-
-One active quest at a time. Accept at a planet, complete the
-objective, and return to that same planet for the payout. Five
-quest types are implemented (see `Quest.h`):
-
-| Type        | Objective | Return required? |
-|-------------|-----------|------------------|
-| Patrol      | Kill N pirates in this system. | Yes |
-| Delivery    | Drop N tons of a commodity at another planet POI. | Yes |
-| VisitPlanet | Touch down at a specified planet POI. | Yes |
-| Courier     | One-way drop of a passenger / packet at a planet POI. | **No** — paid on arrival |
-| Scavenge    | Bring N tons of a commodity not stocked locally. | Yes |
-
-Each quest carries a *difficulty* (EASY / MED / HARD / ELITE) derived
-from distance from system 0, which scales both the size of the
-objective and the payout. Patrol contracts also arm a one-shot pirate
-spawn on the first launch after acceptance — killed pirates do not
-respawn for that contract.
-
-The pause menu always shows the single next step (e.g. `GO TO TRIX II`,
-`KILL 2/4 PIRATES`, `RETURN TO TRIX`). The board itself renders the
-narrative title (`COURIER PACKET TO TRIX II`, `BOUNTY: 3 PIRATES`,
-etc.). Completion fires a modal popup on landing — press `Enter` to
-dismiss before the docked menu becomes usable again.
-
-### Equipment shop
-
-Reached from the docked menu (`EQUIP`). All purchases debit
-`game.credits` in tenths of a credit.
-
-| Item        | Price | Effect |
-|-------------|-------|--------|
-| REPAIR HULL   | 10 CR per +10% | Patches hull damage (full repair = ~100 CR). |
-| REPAIR SHIELD | 100 CR         | One-shot full recharge — required after depletion. |
-| MISSILE     | 30 CR each, cap 4 | Adds one homing missile. |
-| ECM SYSTEM  | 600 CR | Enables the ECM burst (one-time install). |
-| AUTOLOCK    | 300 CR | `F` steers the nose onto the marked ship / planet (one-time install). |
-| LARGE HOLD  | 400 CR | Cargo capacity 20 t → 35 t. |
-| BEAM LASER  | 1000 CR | Mid-tier laser. |
-| MIL LASER   | 6000 CR | Top-tier laser (requires Beam). |
-
-### Rank
-
-The kill counter feeds a seven-tier rank ladder (Harmless → Mostly
-Harmless → Poor → Average → Competent → Dangerous → Deadly). Crossing
-a tier surfaces a `PROMOTED: <RANK>` banner in flight; the status
-card shows your current tier and kills-to-next.
-
-### Audio
-
-All sound effects are synthesized at boot (filtered noise, band-limited
-oscillators, bell partials with natural decays) and mixed on separate
-speaker channels so they don't cut each other off: lasers, hits on
-shields vs hull, explosions, missiles, ECM, landing / launch /
-hyperspace, an engine hum that follows the throttle, menu ticks, trade
-"cash" pings, and cockpit warnings (lock tone, incoming-missile beeper,
-shield-down, hull-critical klaxon, sun heat). `SOUND` on the title and
-pause menus steps OFF / LOW / MED / HIGH.
-
----
-
-## Code structure
-
-Most code lives in single-header `.h` files included from `hazke.ino`,
-the top-level state machine. Each module owns its own state and
-exposes inline functions — there's no build system beyond the Arduino
-IDE.
+The game is a set of single-header modules included from `hazke.ino`,
+which runs the screen state machine and the frame loop.
 
 ```
-hazke.ino           top-level state machine + frame loop
-Config.h            screen, frame, viewport constants
-Input.h             keyboard polling + edge detection
-GameMode.h          enum of screen states
-GameState.h         mutable player state (credits, cargo, ship, faction)
-
-Galaxy.h            16-system procgen + gate adjacency graph
-SolarSystem.h       per-system POI table
-Faction.h           faction map + standing nudges
-Market.h            commodity table + deterministic pricing
-Hyperspace.h        jump cost + neighbour gating
-Rank.h              kill-tier ladder + promotion banner
-Quest.h             quest data model + onDock / onPirateKill hooks
-NPCShip.h           in-flight roster + AI (trader / pirate / patrol)
-Combat.h            laser + missile damage resolution
-Missile.h           homing missile motion + ECM
-Particles.h         tiny pixel explosion / debris system
-Audio.h             SFX synthesizer, mixer channels, engine hum
-SDCard.h            shared lazy microSD bring-up (screenshots + saves)
-SaveFormat.h        versioned save payloads + CRC + upgrade transformers
-SaveStore.h         save-slot IO on LittleFS/SD + game<->payload marshalling
-Ship3D.h            wireframe ship renderer (6 hull silhouettes)
-Starfield.h         hyperspace tunnel stars
-Sky.h               in-flight distant stars + space dust
-Cockpit.h           HUD panel (gauges, missile rack, ECM, footer)
-Radar.h             perspective 3D scanner + contact blips
-Rocket.h            missile art (rack icon, in-flight rocket)
-SystemFlight.h      the actual 3D flight loop + landing-range checks
-
-TitleScreen.h       title menu
-InfoScreen.h        controls help
-AboutScreen.h       about / credits
-ChartScreen.h       galactic gate-graph map
-SystemDataScreen.h  per-system info panel
-MapScreen.h         in-system top-down map
-MarketScreen.h      commodity buy/sell UI
-NPCTradeScreen.h    hail-in-flight buy/sell dialog
-EquipScreen.h       equipment shop (includes REPAIR HULL)
-StatusScreen.h      commander card
-LandingScreen.h     planet surface menu
-QuestScreen.h       planet quest board
-PauseMenu.h         in-flight pause overlay (shows active quest step)
-WitchspaceScreen.h  hyperspace transit cinematic
-GameOverScreen.h    death + restart prompt
-SaveMenuScreen.h    save/load slot picker (backend tabs, copy, delete)
-MenuUI.h            shared menu chrome (headers, footers, toasts)
+hazke.ino           state machine, frame loop, serial console
+Config.h            version, screen layout, build switches
+Input.h             keyboard polling (+ keys held by the console)
+Capture.h           frame capture over serial
+GameState.h         credits, cargo, ship, factions
+Galaxy.h            the 16 systems and their gate links
+SolarSystem.h       planets, belts and the gate in each system
+SystemFlight.h      3D flight, camera, autolock, landing
+NPCShip.h           traders, pirates and patrols
+Combat.h            lasers and damage
+Missile.h           homing missiles and ECM
+Radar.h             3D scanner and hit arcs
+Cockpit.h           gauges, missile rack, footer
+Raster.h            clipped line and triangle drawing
+Ship3D.h            ship models
+Sky.h               distant stars and space dust
+Rocket.h            missile art
+Starfield.h         hyperspace tunnel
+Particles.h         explosions and debris
+Audio.h             sound synthesis and mixing
+Market.h            prices and stock
+Quest.h             jobs
+Faction.h           faction standing
+Rank.h              combat rank
+Hyperspace.h        jump cost and range
+SaveFormat.h        save layout, checksum, upgrades between versions
+SaveStore.h         save slots on flash and SD
+SDCard.h            shared microSD setup
+Screenshot.h        Ctrl+Space screenshots
+*Screen.h, MenuUI.h, PauseMenu.h   menus and screens
 ```
-
-## Design constraints
-
-- ~320 KB usable RAM on the ESP32-S3. POI tables stay small (≤ 16
-  POIs per system, ≤ 4 active NPCs).
-- 240×135 @ 16 bpp via an `M5Canvas` double-buffer. Target ~30 FPS in
-  flight; menus may drop to 15.
-- Game state lives in RAM during play; landed-only saves keep the save
-  format tiny (~100 B) and free of transient flight state.
 
 ## License
 
-Original work. No code or art from the inspirations.
+Original work. No code or art is taken from the games that inspired it.

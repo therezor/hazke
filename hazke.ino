@@ -23,6 +23,7 @@
 #include <M5Cardputer.h>
 #include "Config.h"
 #include "Input.h"
+#include "Capture.h"
 #include "GameState.h"
 #include "Starfield.h"
 #include "Cockpit.h"
@@ -228,15 +229,44 @@ static void runConsoleCommand(char* line) {
                   (unsigned)r[0], (unsigned)r[1], (unsigned)r[2],
                   (unsigned)r[3], (unsigned)r[4], (unsigned)r[5]);
 #endif
+  } else if (strcmp(cmd, "cap") == 0) {
+    // Lockstep capture mode: the game only advances on step / rec.
+    char* arg = strtok(nullptr, " \t");
+    Capture::lockstep = arg && strcmp(arg, "on") == 0;
+    Capture::pending = 0;
+    if (!Capture::lockstep) injectedKeys[0] = '\0';
+    Serial.printf("ok cap %s\n", Capture::lockstep ? "on" : "off");
+  } else if (strcmp(cmd, "keys") == 0) {
+    // Hold these keys until the next "keys" ("keys" alone releases all).
+    char* arg = strtok(nullptr, " \t");
+    strncpy(injectedKeys, arg ? arg : "", sizeof(injectedKeys) - 1);
+    injectedKeys[sizeof(injectedKeys) - 1] = '\0';
+    Serial.printf("ok keys %s\n", injectedKeys);
+  } else if (strcmp(cmd, "step") == 0 || strcmp(cmd, "rec") == 0) {
+    char* arg = strtok(nullptr, " \t");
+    int n = arg ? atoi(arg) : 1;
+    if (!Capture::lockstep || n < 1) {
+      Serial.println("err usage: cap on, then step|rec <frames>");
+      return;
+    }
+    Capture::pending = n;
+    Capture::recording = cmd[0] == 'r';
+  } else if (strcmp(cmd, "shot") == 0) {
+    if (Capture::lastFrame) Capture::sendFrame(*Capture::lastFrame);
+    Serial.println("ok shot");
   } else {
-    Serial.println("err commands: status | credits <CR> | save [1-5] [sd|int]");
+    Serial.println("err commands: status | credits <CR> | save [1-5] [sd|int]"
+                   " | cap on|off | keys <chars> | step|rec <n> | shot");
   }
 }
 
 static void pollSerialConsole() {
   static char line[48];
   static int  len = 0;
-  while (Serial.available() > 0) {
+  // In lockstep, stop reading once a step is queued so the next command
+  // waits until those frames have run.
+  while (Serial.available() > 0 &&
+         !(Capture::lockstep && Capture::pending > 0)) {
     int c = Serial.read();
     if (c == '\r' || c == '\n') {
       if (len == 0) continue;
@@ -453,15 +483,23 @@ void loop() {
   M5Cardputer.update();
 
   uint32_t frameStart = micros();
+  if (Capture::lockstep) {
+    pollSerialConsole();
+    if (Capture::pending == 0) {
+      delay(1);
+      return;
+    }
+  }
   PROF_BEGIN();
   M5Canvas& canvas = *drawBuf;
   float dt = (frameStart - lastFrameMicros) / 1e6f;
   lastFrameMicros = frameStart;
   if (dt > 0.1f) dt = 0.1f;
+  if (Capture::lockstep) dt = Capture::StepDt;
   modePhase += dt;
 
   MenuInput mk = pollMenuInput();
-  pollSerialConsole();
+  if (!Capture::lockstep) pollSerialConsole();
 
   // Global screenshot hotkey: Ctrl+Space writes the current frame to SD.
   // Edge-detected so a held combo snaps exactly one shot.
@@ -1116,8 +1154,15 @@ void loop() {
 
   PROF_MARK(0);
   present(canvas);
+  Capture::lastFrame = &canvas;
   PROF_MARK(3);
   PROF_END();
+
+  if (Capture::lockstep) {
+    if (Capture::recording) Capture::sendFrame(canvas);
+    if (--Capture::pending == 0) Serial.println("ok step");
+    return;
+  }
 
   // Frame cap. Sleep for the whole milliseconds left (yielding the CPU
   // to the speaker task instead of busy-waiting), then spin out the

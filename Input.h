@@ -8,6 +8,11 @@
 //   .  -> down arrow
 //   ,  -> left arrow
 //   /  -> right arrow
+// Keys held down by the serial console ("keys" command) on top of the
+// real keyboard. Same characters the keyboard reports, plus 'T' for Tab
+// and 'N' for Enter.
+inline char injectedKeys[16] = "";
+
 struct InputState {
   bool pitchUp;
   bool pitchDown;
@@ -22,8 +27,11 @@ struct InputState {
 
 inline void pollInput(InputState& in) {
   in = InputState{};
-  if (!M5Cardputer.Keyboard.isPressed()) return;
-  auto state = M5Cardputer.Keyboard.keysState();
+  const bool pressed = M5Cardputer.Keyboard.isPressed();
+  if (!pressed && !injectedKeys[0]) return;
+  auto state = pressed ? M5Cardputer.Keyboard.keysState()
+                       : Keyboard_Class::KeysState{};
+  for (const char* k = injectedKeys; *k; k++) state.word.push_back(*k);
   // Ctrl+Space is the screenshot hotkey; don't also fire when it's held.
   const bool ctrlHeld = state.ctrl;
   for (auto c : state.word) {
@@ -78,8 +86,15 @@ inline MenuInput pollMenuInput() {
   bool enter=false, back=false, chart=false, toggle=false, tab=false, hail=false;
   bool lock=false, missile=false, ecm=false, map=false;
 
-  if (M5Cardputer.Keyboard.isPressed()) {
-    auto st = M5Cardputer.Keyboard.keysState();
+  const bool pressed = M5Cardputer.Keyboard.isPressed();
+  if (pressed || injectedKeys[0]) {
+    auto st = pressed ? M5Cardputer.Keyboard.keysState()
+                      : Keyboard_Class::KeysState{};
+    for (const char* k = injectedKeys; *k; k++) {
+      if      (*k == 'T') st.tab = true;
+      else if (*k == 'N') st.enter = true;
+      else st.word.push_back(*k);
+    }
     if (st.enter) enter = true;
     // The top-left backtick key acts as ESC (where a real ESC would
     // normally sit); see the '`' case in the word loop below.
