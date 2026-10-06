@@ -296,5 +296,4 @@ Screenshot.h        Ctrl+Space screenshots
 
 ## 📄 License
 
-Original work. Hazke uses no code or art from *Elite*, *Parkan: Imperial Chronicles* or
-*Galaxy on Fire 2*, the games that inspired it. Made by REZOR ([@therezor](https://github.com/therezor)).
+MIT, see [LICENSE](LICENSE). Made by REZOR ([@therezor](https://github.com/therezor)).

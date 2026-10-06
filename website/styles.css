@@ -174,6 +174,7 @@ footer{border-top:1px solid var(--rule); padding:48px 0 60px; margin-top:clamp(4
 .foot-links a:hover{color:var(--cyan)}
 .foot-links a:focus-visible{outline:2px solid var(--ink); outline-offset:3px}
 .colophon{max-width:48ch; color:var(--ink-faint); font-size:.82rem; margin-top:26px; line-height:1.6}
+.colophon a{color:var(--ink-dim)}
 
 /* ---- screenshots + cardputer mockup ---- */
 .cardputer{
