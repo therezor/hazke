@@ -248,7 +248,7 @@ inline void update(GameState& g, float dt,
     } else {
       float dx = playerX - m.wx, dy = playerY - m.wy, dz = playerZ - m.wz;
       if (dx*dx + dy*dy + dz*dz < HitRadius * HitRadius) {
-        Combat::damagePlayer(g, PlayerDamage);
+        Combat::damagePlayer(g, PlayerDamage, m.wx, m.wy, m.wz);
         m.active = false;
         continue;
       }

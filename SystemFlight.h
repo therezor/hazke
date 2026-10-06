@@ -15,6 +15,7 @@
 #include "Rank.h"
 #include "Audio.h"
 #include "Radar.h"
+#include "Raster.h"
 #include "Rocket.h"
 
 // Refit R11: in-system free flight.
@@ -829,7 +830,7 @@ inline void update(GameState& g, float dt) {
     float d2 = dx*dx + dy*dy + dz*dz;
     if (d2 > CollisionRadius * CollisionRadius) continue;
     if (collisionCD <= 0.0f) {
-      Combat::damagePlayerHull(g, CollisionDamage);
+      Combat::damagePlayerHull(g, CollisionDamage, sh.wx, sh.wy, sh.wz);
       Audio::collisionThump();
       collisionCD = 0.45f;
     }
@@ -1073,12 +1074,11 @@ inline void renderIcoSphere(M5Canvas& g,
   // Verts are accepted down to a much tighter plane than the POI cull
   // (NearZ = 50): on a close approach the body spans verts sitting just
   // in front of the camera, and dropping their faces punches holes in
-  // the sphere. Projected coords are clamped so a vert grazing the
-  // plane can't hand the rasterizer a megapixel triangle.
-  struct V { int sx, sy; bool vis; };
+  // the sphere. Such a vert projects far off-screen, so faces go through
+  // Raster::tri, which clips them to the viewport before rasterizing.
+  struct V { float sx, sy; bool vis; };
   V pv[IcoSubVerts];
-  constexpr float BodyNearZ  = 6.0f;
-  constexpr int   CoordLimit = 3000;
+  constexpr float BodyNearZ = 6.0f;
   for (int i = 0; i < IcoSubVerts; i++) {
     float cx, cy, cz;
     camSpace(pcx_w + icoSubV[i][0] * radius - state.px,
@@ -1086,14 +1086,9 @@ inline void renderIcoSphere(M5Canvas& g,
              pcz_w + icoSubV[i][2] * radius - state.pz, cx, cy, cz);
     pv[i].vis = (cz > BodyNearZ);
     if (pv[i].vis) {
-      int sxv, syv;
-      toScreen(cx, cy, cz, sxv, syv);
-      if (sxv < -CoordLimit) sxv = -CoordLimit;
-      if (sxv >  CoordLimit) sxv =  CoordLimit;
-      if (syv < -CoordLimit) syv = -CoordLimit;
-      if (syv >  CoordLimit) syv =  CoordLimit;
-      pv[i].sx = sxv;
-      pv[i].sy = syv;
+      float k = FocalLen / cz;
+      pv[i].sx = ViewCX + cx * k;
+      pv[i].sy = ViewCY - cy * k;
     }
   }
 
@@ -1118,7 +1113,7 @@ inline void renderIcoSphere(M5Canvas& g,
     float vd = nx*vdx + ny*vdy + nz*vdz;
     if (vd <= icoH[f] * rOverD) continue;     // backface
     uint16_t col = shader(nx, ny, nz, vd);
-    g.fillTriangle(pv[ia].sx, pv[ia].sy,
+    Raster::tri(g, pv[ia].sx, pv[ia].sy,
                    pv[ib].sx, pv[ib].sy,
                    pv[ic].sx, pv[ic].sy, col);
   }
@@ -1174,9 +1169,10 @@ inline void renderPlanetRing3D(M5Canvas& g,
                                uint16_t color) {
   if (!icoSubReady) buildIcoSubdivided();
   constexpr int RingN = RingSegs;
-  // Same clamp as the icosphere: a ring vertex just past the near plane
-  // can project tens of thousands of pixels off-screen.
-  constexpr int CoordLimit = 3000;
+  // A ring vertex just past the near plane can project tens of thousands
+  // of pixels off-screen; the clamp only keeps the int math sane, the
+  // lines themselves are clipped by Raster::line.
+  constexpr int CoordLimit = 100000;
   int  sxO[RingN]; int syO[RingN]; bool visO[RingN];
   int  sxI[RingN]; int syI[RingN]; bool visI[RingN];
 
@@ -1226,14 +1222,14 @@ inline void renderPlanetRing3D(M5Canvas& g,
   for (int k = 0; k < RingN; k++) {
     int kn = (k + 1) % RingN;
     if (visO[k] && visO[kn]) {
-      g.drawLine(sxO[k], syO[k], sxO[kn], syO[kn], color);
+      Raster::line(g, sxO[k], syO[k], sxO[kn], syO[kn], color);
     }
     if (visI[k] && visI[kn]) {
-      g.drawLine(sxI[k], syI[k], sxI[kn], syI[kn], color);
+      Raster::line(g, sxI[k], syI[k], sxI[kn], syI[kn], color);
     }
     // Four spokes connecting inner to outer rim.
     if ((k % (RingN / 4)) == 0 && visO[k] && visI[k]) {
-      g.drawLine(sxI[k], syI[k], sxO[k], syO[k], color);
+      Raster::line(g, sxI[k], syI[k], sxO[k], syO[k], color);
     }
   }
 }
@@ -1516,7 +1512,7 @@ inline void renderWorld(M5Canvas& g) {
         for (int kk = 0; kk < RingN; kk++) {
           int knx = (kk + 1) % RingN;
           if (rvis[kk] && rvis[knx]) {
-            g.drawLine(rsx[kk], rsy[kk], rsx[knx], rsy[knx], rim);
+            Raster::line(g, rsx[kk], rsy[kk], rsx[knx], rsy[knx], rim);
           }
         }
         // Tiny inner cross at the gate's projected center — keeps the
@@ -1638,6 +1634,15 @@ inline void renderRadarBlips(M5Canvas& g) {
     const auto& m = Missile::pool[i];
     if (!m.active) continue;
     addAt(m.wx, m.wy, m.wz, m.color, Radar::Missile, 0);
+  }
+
+  // Hit-direction arcs on the rim, under the blips.
+  for (int i = 0; i < Combat::MaxHitMarks; i++) {
+    const auto& h = Combat::hitMarks[i];
+    if (h.t <= 0.0f) continue;
+    float cx, cy, cz;
+    camSpace(h.wx - state.px, h.wy - state.py, h.wz - state.pz, cx, cy, cz);
+    Radar::drawHitArc(g, cx, cy, cz, h.t / Combat::HitMarkTime);
   }
 
   Radar::drawBlips(g);
@@ -2170,7 +2175,7 @@ inline void renderLasers(M5Canvas& g) {
     int hy = sy + (int)((ey - sy) * prog);
     int tx = sx + (int)((ex - sx) * tprog);
     int ty = sy + (int)((ey - sy) * tprog);
-    g.drawLine(tx, ty, hx, hy, col);
+    Raster::line(g, tx, ty, hx, hy, col);
     // Bullet head: bright white core for a sense of speed.
     g.fillCircle(hx, hy, 1, 0xFFFF);
     g.drawPixel(hx, hy, 0xFFFF);

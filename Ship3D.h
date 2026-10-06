@@ -2,6 +2,7 @@
 #include <M5GFX.h>
 #include <math.h>
 #include "Config.h"
+#include "Raster.h"
 
 // 3D wireframe ship rendering. All vertex/edge data is original to this project.
 
@@ -307,7 +308,10 @@ inline void renderBasis(M5Canvas& g, const Model& m,
   const int viewCx = Config::ViewX + Config::ViewW / 2;
   const int viewCy = Config::ViewY + Config::ViewH / 2;
 
-  struct ProjV { int sx, sy; bool visible; };
+  // Projected coordinates stay float: a corner just past the near plane
+  // lands far off-screen, and everything below is clipped (Raster) rather
+  // than handed to the rasterizer raw.
+  struct ProjV { float sx, sy; bool visible; };
   ProjV pv[32];
 
   for (int i = 0; i < m.nverts && i < 32; i++) {
@@ -321,13 +325,14 @@ inline void renderBasis(M5Canvas& g, const Model& m,
     float z = cz + vx * rrz + vy * uuz + vz * ffz;
 
     if (z < 3.0f) { pv[i].visible = false; continue; }
-    pv[i].sx = viewCx + (int)(x * fov / z);
-    pv[i].sy = viewCy - (int)(y * fov / z);
+    pv[i].sx = viewCx + x * fov / z;
+    pv[i].sy = viewCy - y * fov / z;
     pv[i].visible = true;
   }
 
   // ---- Filled silhouette via convex hull (gift wrap) ----
-  int  pxs[32], pys[32], nP = 0;
+  float pxs[32], pys[32];
+  int   nP = 0;
   for (int i = 0; i < m.nverts && i < 32; i++) {
     if (pv[i].visible) {
       pxs[nP] = pv[i].sx;
@@ -350,10 +355,10 @@ inline void renderBasis(M5Canvas& g, const Model& m,
       for (int j = 0; j < nP; j++) {
         if (j == current) continue;
         if (next == -1) { next = j; continue; }
-        long crossZ =
-            (long)(pxs[next] - pxs[current]) * (pys[j] - pys[current]) -
-            (long)(pys[next] - pys[current]) * (pxs[j] - pxs[current]);
-        if (crossZ < 0) next = j;
+        float crossZ =
+            (pxs[next] - pxs[current]) * (pys[j] - pys[current]) -
+            (pys[next] - pys[current]) * (pxs[j] - pxs[current]);
+        if (crossZ < 0.0f) next = j;
       }
       current = next;
     } while (current != start && nH < 32);
@@ -361,28 +366,18 @@ inline void renderBasis(M5Canvas& g, const Model& m,
     if (nH >= 3) {
       uint16_t fill = darkenRGB565(color, 0.60f);
       for (int i = 1; i < nH - 1; i++) {
-        g.fillTriangle(pxs[hull[0]],     pys[hull[0]],
+        Raster::tri(g, pxs[hull[0]],     pys[hull[0]],
                        pxs[hull[i]],     pys[hull[i]],
-                       pxs[hull[i + 1]], pys[hull[i + 1]],
-                       fill);
+                       pxs[hull[i + 1]], pys[hull[i + 1]], fill);
       }
     }
   }
 
   // ---- Wireframe edges on top ----
-  const int x0 = Config::ViewX + 1;
-  const int y0 = Config::ViewY + 1;
-  const int x1 = Config::ViewX + Config::ViewW - 2;
-  const int y1 = Config::ViewY + Config::ViewH - 2;
-
   for (int i = 0; i < m.nedges; i++) {
     const auto& e = m.edges[i];
     if (!pv[e.a].visible || !pv[e.b].visible) continue;
-    int ax = pv[e.a].sx, ay = pv[e.a].sy;
-    int bx = pv[e.b].sx, by = pv[e.b].sy;
-    if ((ax < x0 && bx < x0) || (ax > x1 && bx > x1) ||
-        (ay < y0 && by < y0) || (ay > y1 && by > y1)) continue;
-    g.drawLine(ax, ay, bx, by, color);
+    Raster::line(g, pv[e.a].sx, pv[e.a].sy, pv[e.b].sx, pv[e.b].sy, color);
   }
 }
 

@@ -166,6 +166,48 @@ inline void drawScope(M5Canvas& g) {
   g.clearClipRect();
 }
 
+// ---- Hit direction ----
+// Lights a stretch of the rim red on the side a hit came from, plus a
+// tick pointing in from the rim. (cx, cy, cz) is the source's camera-space offset; `life`
+// runs 1 → 0: it strobes first, then holds, then dims out. A hit from
+// almost straight above or below has no bearing, so the whole rim flashes.
+constexpr int HitArcHalf = 4;   // rim segments each side of the bearing
+
+inline void drawHitArc(M5Canvas& g, float cx, float cy, float cz,
+                       float life) {
+  if (life <= 0.0f) return;
+  if (life > 0.75f && ((millis() / 70u) & 1u)) return;
+  build();
+  uint16_t col = life < 0.35f ? 0x8000 : TFT_RED;   // dims as it fades
+
+  g.setClipRect(BayX0, BayY0, BayX1 - BayX0 + 1, BayY1 - BayY0 + 1);
+  float h = sqrtf(cx * cx + cz * cz);
+  int k0, k1;
+  if (h < 0.5f * fabsf(cy)) {
+    k0 = 0; k1 = RimN - 1;
+  } else {
+    // Rim index of the bearing (0 = dead ahead, clockwise toward +x).
+    float a = atan2f(cx, cz);
+    if (a < 0.0f) a += 6.2831853f;
+    int k = (int)lroundf(a * RimN / 6.2831853f) % RimN;
+    k0 = k - HitArcHalf; k1 = k + HitArcHalf - 1;
+    float ux = cx / h, uz = cz / h;
+    int rx, ry, ix, iy;
+    project(ux, 0.0f, uz, rx, ry);
+    project(ux * 0.8f, 0.0f, uz * 0.8f, ix, iy);
+    g.drawLine(rx, ry, ix, iy, col);
+  }
+  // Three strokes (rim and the two lip rows) so it reads as a band.
+  for (int j = k0; j <= k1; j++) {
+    const Pt& a = rim[(j + RimN) % RimN];
+    const Pt& b = rim[(j + 1 + RimN) % RimN];
+    for (int dy = -1; dy <= 1; dy++) {
+      g.drawLine(a.x, a.y + dy, b.x, b.y + dy, col);
+    }
+  }
+  g.clearClipRect();
+}
+
 // ---- Contacts ----
 enum Kind : uint8_t { Body, Ship, Missile, Home };
 enum : uint8_t { FLocked = 1, FMarked = 2 };

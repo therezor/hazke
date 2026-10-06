@@ -61,9 +61,37 @@ inline Flash npcFlash[NPCShip::MaxNPCs];
 inline float playerHitFlash = 0.0f;
 constexpr float PlayerHitFlashTime = 0.25f;
 
+// Where recent hits came from, for the arc the scanner lights on its
+// rim. World-space source position (the shooter / missile / rammer at
+// impact), so the arc swings round as the player turns. A few slots so
+// a crossfire shows both sides.
+struct HitMark { float wx, wy, wz, t; };
+constexpr int   MaxHitMarks = 3;
+constexpr float HitMarkTime = 1.2f;   // s
+inline HitMark hitMarks[MaxHitMarks];
+
+inline void markHit(float wx, float wy, float wz) {
+  // Reuse the slot of a still-showing hit from (nearly) the same spot,
+  // else the one closest to expiry.
+  int best = 0;
+  for (int i = 0; i < MaxHitMarks; i++) {
+    const HitMark& h = hitMarks[i];
+    float dx = h.wx - wx, dy = h.wy - wy, dz = h.wz - wz;
+    if (h.t > 0.0f && dx * dx + dy * dy + dz * dz < 600.0f * 600.0f) {
+      best = i;
+      break;
+    }
+    if (h.t < hitMarks[best].t) best = i;
+  }
+  HitMark& h = hitMarks[best];
+  h.wx = wx; h.wy = wy; h.wz = wz;
+  h.t = HitMarkTime;
+}
+
 inline void resetFlashes() {
   playerFlash.t = 0.0f;
   playerHitFlash = 0.0f;
+  for (int i = 0; i < MaxHitMarks; i++) hitMarks[i].t = 0.0f;
   for (int i = 0; i < NPCShip::MaxNPCs; i++) npcFlash[i].t = 0.0f;
 }
 
@@ -76,6 +104,9 @@ inline void tick(float dt) {
   if (playerHitFlash > 0.0f) {
     playerHitFlash -= dt;
     if (playerHitFlash < 0.0f) playerHitFlash = 0.0f;
+  }
+  for (int i = 0; i < MaxHitMarks; i++) {
+    if (hitMarks[i].t > 0.0f) hitMarks[i].t -= dt;
   }
   for (int i = 0; i < NPCShip::MaxNPCs; i++) {
     if (npcFlash[i].t > 0.0f) {
@@ -192,8 +223,10 @@ inline bool tryPlayerFire(GameState& g,
 
 // --- NPC → Player fire ----------------------------------------------------
 // Shield absorbs first; anything past it spills onto the hull. Used by
-// both laser and missile impacts.
-inline void damagePlayer(GameState& g, float amount) {
+// both laser and missile impacts; (sx, sy, sz) is where the hit came
+// from, for the scanner's hit-direction arc.
+inline void damagePlayer(GameState& g, float amount,
+                         float sx, float sy, float sz) {
   bool shielded = g.shield > 0.0f;
   if (shielded) {
     g.shield -= amount;
@@ -211,15 +244,18 @@ inline void damagePlayer(GameState& g, float amount) {
   if (shielded) Audio::shieldHit(); else Audio::hullHit();
   if (shielded && g.shield <= 0.0f) Audio::shieldDown();
   playerHitFlash = PlayerHitFlashTime;
+  markHit(sx, sy, sz);
 }
 
 // Direct hull damage — collisions bypass shields entirely so a ram is
 // always punishing.
-inline void damagePlayerHull(GameState& g, float amount) {
+inline void damagePlayerHull(GameState& g, float amount,
+                             float sx, float sy, float sz) {
   g.hull -= amount;
   if (g.hull < 0.0f) g.hull = 0.0f;
   Audio::hullHit();
   playerHitFlash = PlayerHitFlashTime;
+  markHit(sx, sy, sz);
 }
 
 inline void updateNPCs(GameState& g, float dt) {
@@ -246,7 +282,7 @@ inline void updateNPCs(GameState& g, float dt) {
     npcFlash[i].t       = FlashLifetime;
     npcFlash[i].shipIdx = i;
     npcFlash[i].color   = 0xF800;  // red
-    damagePlayer(g, NPCDamage);
+    damagePlayer(g, NPCDamage, sh.wx, sh.wy, sh.wz);
   }
 }
 

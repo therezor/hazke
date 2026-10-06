@@ -343,31 +343,48 @@ inline void renderAll() {
           .rel = 3, .hp = 1800 });
   fxLaserMil = endFx(1.3f);
 
-  // Target hit — bright metallic tink plus a click, so a connecting shot
-  // reads over the fire sound.
-  beginFx(75, RateHi);
-  bell(1250, 0, 70, 0.7f, 20, /*metal=*/true);
-  voice({ .w = Wave::Noise, .dur = 10, .amp = 0.6f, .atk = 0.2f, .decay = 3,
-          .rel = 2, .hp = 3000 });
-  fxHit = endFx(1.3f);
+  // Target hit — a laser striking a hull: a short zap diving off the top
+  // over a crackling sizzle, with a little body under it. No bell
+  // partials (they rang like glass); the sizzle is what sets it apart
+  // from the fire sound.
+  beginFx(95, RateHi);
+  voice({ .w = Wave::Saw, .f0 = 2400, .f1 = 700, .dur = 60, .amp = 0.55f,
+          .atk = 0.3f, .decay = 22, .lp0 = 5000, .lp1 = 1800,
+          .detune = 0.02f });
+  voice({ .w = Wave::Noise, .dur = 90, .amp = 0.65f, .atk = 0.5f, .decay = 28,
+          .rel = 15, .lp0 = 5000, .lp1 = 2000, .hp = 1200, .trmHz = 140,
+          .trm = 0.5f });
+  voice({ .w = Wave::Square, .f0 = 900, .f1 = 250, .dur = 45, .amp = 0.35f,
+          .atk = 0.5f, .decay = 18, .lp0 = 2500 });
+  fxHit = endFx(1.4f);
 
-  // Shield hit — electric fizz: band-passed noise buzzing at 60 Hz plus
-  // a falling square hum.
-  beginFx(150, RateHi);
-  voice({ .w = Wave::Noise, .dur = 140, .amp = 0.8f, .atk = 1, .decay = 55,
-          .lp0 = 4500, .lp1 = 1400, .hp = 700, .trmHz = 60, .trm = 0.6f });
-  voice({ .w = Wave::Square, .f0 = 330, .f1 = 230, .dur = 130, .amp = 0.3f,
-          .atk = 1, .decay = 60, .lp0 = 2000 });
-  fxShieldHit = endFx(1.4f);
+  // Shield hit — a dull punch absorbed by the field: a sine kick diving
+  // 520 → 110 Hz, a low detuned buzz that thrums and closes down, and a
+  // short dark crack. Everything sits under ~2 kHz — the bright fizz and
+  // ringing partials it had before read as breaking glass.
+  beginFx(190, RateLo);
+  voice({ .w = Wave::Sine, .f0 = 520, .f1 = 110, .dur = 95, .amp = 0.9f,
+          .atk = 0.5f, .decay = 35 });
+  voice({ .w = Wave::Saw, .f0 = 180, .f1 = 120, .dur = 180, .amp = 0.45f,
+          .atk = 2, .decay = 75, .rel = 40, .lp0 = 1800, .lp1 = 450,
+          .trmHz = 32, .trm = 0.45f, .detune = 0.03f });
+  voice({ .w = Wave::Noise, .dur = 35, .amp = 0.5f, .atk = 0.5f, .decay = 10,
+          .rel = 6, .lp0 = 2400, .lp1 = 900 });
+  fxShieldHit = endFx(1.5f);
 
-  // Hull hit — metal crunch: dark noise burst over clanging partials.
-  beginFx(180, RateHi);
-  voice({ .w = Wave::Noise, .dur = 160, .amp = 1.0f, .atk = 0.5f, .decay = 45,
-          .lp0 = 3200, .lp1 = 600 });
-  bell(330, 0, 170, 0.7f, 65, /*metal=*/true);
-  voice({ .w = Wave::Square, .f0 = 210, .f1 = 150, .dur = 120, .amp = 0.35f,
-          .atk = 1, .decay = 55, .lp0 = 1500 });
-  fxHullHit = endFx(1.6f);
+  // Hull hit — heavy thud into a crunch: a deep sine kick, low-passed
+  // noise whose cutoff falls away, a little debris crackle and a short
+  // structural groan. No bell partials (they ring like glass).
+  beginFx(250, RateLo);
+  voice({ .w = Wave::Sine, .f0 = 300, .f1 = 60, .dur = 150, .amp = 1.0f,
+          .atk = 0.5f, .decay = 55 });
+  voice({ .w = Wave::Noise, .dur = 210, .amp = 0.9f, .atk = 0.5f, .decay = 50,
+          .rel = 40, .lp0 = 1800, .lp1 = 250 });
+  voice({ .w = Wave::Crackle, .at = 10, .dur = 170, .amp = 0.4f, .atk = 2,
+          .decay = 60, .rel = 40, .lp0 = 2500 });
+  voice({ .w = Wave::Square, .f0 = 140, .f1 = 95, .dur = 170, .amp = 0.3f,
+          .atk = 2, .decay = 70, .rel = 40, .lp0 = 700 });
+  fxHullHit = endFx(1.8f);
 
   // Hostile alert — two rising whoops with a little vibrato.
   beginFx(230, RateLo);

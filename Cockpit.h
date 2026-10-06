@@ -20,6 +20,7 @@ constexpr int Row0   = Config::HudY + 2;
 constexpr int LeftX  = 4;
 constexpr int RightX = Config::ScreenW - BarW - 4;
 constexpr uint16_t cSegOff = 0x18E3;   // unlit block
+constexpr uint16_t cFrame  = 0x2945;   // viewport border, bay walls, dividers
 
 inline bool blink(uint32_t periodMs = 250) {
   return ((millis() / periodMs) & 1u) == 0u;
@@ -51,21 +52,15 @@ inline void drawBar(M5Canvas& g, int x, int y, float val, uint16_t color,
   }
 }
 
-// Instrument bay around the scanner: the panel edge bends down into a
-// recess whose walls lean in, as if the scope sits lower in the console.
+// Instrument bay around the scanner: two walls leaning in from the
+// viewport border, as if the scope sits lower in the console. No top
+// edge — the viewport frame already closes it off.
 inline void drawBay(M5Canvas& g) {
-  const uint16_t cPanel = TFT_DARKGREY;
-  const uint16_t cWall  = 0x2945;
   const int y0 = Config::HudY - 1;
   const int y1 = Config::ScreenH - 1;
   const int xl = Radar::BayX0 - 2, xr = Radar::BayX1 + 2;
-  g.drawFastHLine(0, y0, xl - 2, cPanel);
-  g.drawFastHLine(xr + 3, y0, Config::ScreenW - xr - 3, cPanel);
-  g.drawLine(xl - 2, y0, xl, y0 + 2, cPanel);
-  g.drawLine(xr + 2, y0, xr, y0 + 2, cPanel);
-  g.drawFastHLine(xl + 1, y0 + 2, xr - xl - 1, cWall);
-  g.drawLine(xl, y0 + 2, xl + 3, y1, cWall);
-  g.drawLine(xr, y0 + 2, xr - 3, y1, cWall);
+  g.drawLine(xl, y0, xl + 3, y1, cFrame);
+  g.drawLine(xr, y0, xr - 3, y1, cFrame);
 }
 
 // Read the Cardputer's Li-Po voltage and convert via a piecewise-linear
@@ -111,9 +106,9 @@ inline int readBatteryPercent() {
 inline void drawFooter(M5Canvas& g, const GameState& s) {
   const int y = Config::FooterY;
   // Divider under each gauge column; the radar bay runs on down between.
-  g.drawFastHLine(0, y - 1, Radar::BayX0 - 1, TFT_DARKGREY);
+  g.drawFastHLine(0, y - 1, Radar::BayX0 - 1, cFrame);
   g.drawFastHLine(Radar::BayX1 + 2, y - 1,
-                  Config::ScreenW - Radar::BayX1 - 2, TFT_DARKGREY);
+                  Config::ScreenW - Radar::BayX1 - 2, cFrame);
 
   // Credits, left-aligned (Elite-style decicredits)
   g.setTextSize(1);
@@ -138,7 +133,7 @@ inline void drawFooter(M5Canvas& g, const GameState& s) {
 inline void draw(M5Canvas& g, const GameState& s) {
   // Viewport frame
   g.drawRect(Config::ViewX, Config::ViewY,
-             Config::ViewW, Config::ViewH, TFT_DARKGREY);
+             Config::ViewW, Config::ViewH, cFrame);
 
   // Crosshair (gun reticle)
   int cx = Config::ViewX + Config::ViewW / 2;

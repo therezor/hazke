@@ -203,6 +203,31 @@ static void runConsoleCommand(char* line) {
     if (ok) Audio::missionAccept(); else Audio::deny();
     Serial.printf("%s save slot=%d/%s\n", ok ? "ok" : "err", slot + 1,
                   SaveStore::backendName(slotBackend));
+#if HAZKE_PROFILE
+  } else if (strcmp(cmd, "bench") == 0) {
+    // Raw M5GFX vs Raster (clipped) on the far-off-screen shapes the
+    // flight camera can produce: a ship sliver with a corner at -50k px,
+    // a sphere face at the old ±3000 clamp, and a long off-screen line.
+    M5Canvas& g = *drawBuf;
+    g.setClipRect(Config::ViewX, Config::ViewY, Config::ViewW, Config::ViewH);
+    auto timeUs = [](auto fn) {
+      uint32_t t = micros();
+      for (int i = 0; i < 5; i++) fn();
+      return (micros() - t) / 5u;
+    };
+    uint32_t r[6];
+    r[0] = timeUs([&] { g.fillTriangle(-50000, 30, -46000, 50, 130, 45, 0x2104); });
+    r[1] = timeUs([&] { Raster::tri(g, -50000, 30, -46000, 50, 130, 45, 0x2104); });
+    r[2] = timeUs([&] { g.fillTriangle(-3000, -3000, 3000, -3000, 0, 3000, 0x2104); });
+    r[3] = timeUs([&] { Raster::tri(g, -3000, -3000, 3000, -3000, 0, 3000, 0x2104); });
+    r[4] = timeUs([&] { g.drawLine(-50000, 20, 100, 60, 0x2104); });
+    r[5] = timeUs([&] { Raster::line(g, -50000, 20, 100, 60, 0x2104); });
+    g.clearClipRect();
+    Serial.printf("ok bench us: sliver raw %u clip %u | face raw %u clip %u"
+                  " | line raw %u clip %u\n",
+                  (unsigned)r[0], (unsigned)r[1], (unsigned)r[2],
+                  (unsigned)r[3], (unsigned)r[4], (unsigned)r[5]);
+#endif
   } else {
     Serial.println("err commands: status | credits <CR> | save [1-5] [sd|int]");
   }
@@ -236,35 +261,69 @@ static void present(M5Canvas& c) {
 }
 
 #if HAZKE_PROFILE
-// Frame-time profiler: per-phase averages, FPS and heap every 2 s.
+// Frame-time profiler: per-phase averages, FPS and heap every 2 s, plus
+// an immediate [hitch] line for any frame whose loop-to-loop period runs
+// past HitchUs, broken down by phase so a stall can be pinned on one.
+// "kbd" is M5Cardputer.update() and "gap" is everything outside the
+// instrumented frame (the frame-cap wait, other tasks holding the core).
 namespace Prof {
   constexpr int Phases = 4;   // logic, world, hud, present
+  constexpr uint32_t HitchUs = 40000;
   inline uint32_t acc[Phases] = {0};
+  inline uint32_t cur[Phases] = {0};
   inline uint32_t t = 0, frames = 0, windowStart = 0;
-  inline void begin() { t = micros(); }
-  inline void mark(int phase) { uint32_t now = micros(); acc[phase] += now - t; t = now; }
+  inline uint32_t loopStart = 0, kbdUs = 0, prevLoop = 0, prevEnd = 0;
+  inline uint32_t worstUs = 0;
+  inline void loopBegin() { loopStart = micros(); }
+  inline void begin() {
+    t = micros();
+    kbdUs = t - loopStart;
+    for (auto& c : cur) c = 0;
+  }
+  inline void mark(int phase) {
+    uint32_t now = micros();
+    acc[phase] += now - t; cur[phase] += now - t; t = now;
+  }
   inline void endFrame() {
+    uint32_t end = micros();
+    if (prevLoop != 0) {
+      uint32_t period = loopStart - prevLoop;
+      if (period > worstUs) worstUs = period;
+      if (period > HitchUs) {
+        Serial.printf("[hitch] %.1f ms | gap %.1f kbd %.1f logic %.1f world %.1f"
+                      " hud %.1f present %.1f | mode %d\n",
+                      period / 1000.0f, (loopStart - prevEnd) / 1000.0f,
+                      kbdUs / 1000.0f, cur[0] / 1000.0f, cur[1] / 1000.0f,
+                      cur[2] / 1000.0f, cur[3] / 1000.0f, (int)mode);
+      }
+    }
+    prevLoop = loopStart;
+    prevEnd = end;
     frames++;
     uint32_t now = millis();
     if (windowStart == 0) windowStart = now;
     if (now - windowStart < 2000u) return;
     float n = (float)frames;
     Serial.printf("[prof] %.1f fps | logic %.2f world %.2f hud %.2f present %.2f ms"
-                  " | heap %u dma-block %u\n",
+                  " | worst %.1f ms | heap %u dma-block %u\n",
                   n * 1000.0f / (float)(now - windowStart),
                   acc[0] / n / 1000.0f, acc[1] / n / 1000.0f,
                   acc[2] / n / 1000.0f, acc[3] / n / 1000.0f,
+                  worstUs / 1000.0f,
                   (unsigned)ESP.getFreeHeap(),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     for (auto& a : acc) a = 0;
+    worstUs = 0;
     frames = 0;
     windowStart = now;
   }
 }
+#define PROF_LOOP()   Prof::loopBegin()
 #define PROF_BEGIN()  Prof::begin()
 #define PROF_MARK(p)  Prof::mark(p)
 #define PROF_END()    Prof::endFrame()
 #else
+#define PROF_LOOP()
 #define PROF_BEGIN()
 #define PROF_MARK(p)
 #define PROF_END()
@@ -390,6 +449,7 @@ static void selectMenuItem() {
 }
 
 void loop() {
+  PROF_LOOP();
   M5Cardputer.update();
 
   uint32_t frameStart = micros();
