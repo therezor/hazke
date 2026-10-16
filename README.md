@@ -72,8 +72,7 @@ generates all sixteen systems from one seed, so the galaxy is the same on every 
 turns when you turn the Cardputer. Hold the Cardputer still and the ship holds its heading. The keys
 still work, and their turns add to the gyro's. Hold `Alt` to stop gyro aiming while you shift your grip.
 
-- GYRO has five settings: OFF, 0.5X, 1X, 2X and 3X. At 0.5X the ship turns as far as the Cardputer
-  does. At 1X it turns twice as far.
+- GYRO has five settings: OFF, 0.5X, 1X, 2X and 3X. A higher setting turns the ship further.
 - You can hold the Cardputer at any angle. The game finds the real vertical with the accelerometer.
   Turn the Cardputer left and the ship yaws left. Tip the top edge toward you and the nose comes up.
   Turn it like a steering wheel and the ship rolls.
