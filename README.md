@@ -28,8 +28,7 @@
   <a href="https://github.com/therezor/hazke/releases/download/v1.3.0/hazke-v1.3-demo.mp4"><img src="website/media/hyperspace.png" width="32%" alt="the hyperspace jump screen"></a>
 </p>
 
-<p align="center"><a href="https://github.com/therezor/hazke/releases/download/v1.3.0/hazke-v1.3-demo.mp4"><b>Download the 41-second demo video</b></a>, captured from the Cardputer's own screen at 25 frames per second.
-Gyro aiming has <a href="#-new-in-v14">its own video</a>.</p>
+<p align="center"><a href="https://github.com/therezor/hazke/releases/download/v1.3.0/hazke-v1.3-demo.mp4"><b>Download the 41-second demo video</b></a>, captured from the Cardputer's own screen at 25 frames per second.</p>
 
 In the demo:
 
@@ -68,12 +67,6 @@ generates all sixteen systems from one seed, so the galaxy is the same on every 
 | 📡 **Internet** | Not needed |
 
 ## ✨ New in v1.4
-
-<p align="center">
-  <a href="https://github.com/therezor/hazke/releases/download/v1.4.0/hazke-v1.4-promo.mp4"><img src="website/media/gyro-promo.jpg" width="720" alt="A hand holding a Cardputer ADV next to a capture of its screen, under the title GYRO AIMING"></a>
-</p>
-
-<p align="center"><a href="https://github.com/therezor/hazke/releases/download/v1.4.0/hazke-v1.4-promo.mp4"><b>Watch the 23-second gyro aiming video</b></a>, with camera footage of a Cardputer ADV and captures of its screen.</p>
 
 🧭 **Gyro aiming on the Cardputer ADV.** Turn GYRO on in the title or pause menu, and the ship
 turns when you turn the Cardputer. Hold the Cardputer still and the ship holds its heading. The keys
