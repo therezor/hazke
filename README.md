@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://github.com/therezor/hazke/releases/latest"><b>⬇️ Download firmware</b></a> ·
   <a href="#-watch-it-play"><b>▶️ Watch it play</b></a> ·
-  <a href="#-new-in-v13"><b>✨ New in v1.3</b></a> ·
+  <a href="#-new-in-v14"><b>✨ New in v1.4</b></a> ·
   <a href="#-try-it-in-3-steps"><b>🚀 Try it</b></a> ·
   <a href="#-controls"><b>🎮 Controls</b></a>
 </p>
@@ -66,7 +66,22 @@ generates all sixteen systems from one seed, so the galaxy is the same on every 
 | 💾 **Saves** | 5 slots in flash and 5 on the SD card, about 100 bytes each |
 | 📡 **Internet** | Not needed |
 
-## ✨ New in v1.3
+## ✨ New in v1.4
+
+🧭 **Gyro aiming on the Cardputer ADV.** Turn GYRO on in the title or pause menu, and the ship
+turns when you turn the Cardputer. Hold the Cardputer still and the ship holds its heading. The keys
+still work, and their turns add to the gyro's. Hold `Alt` to stop gyro aiming while you shift your grip.
+
+- GYRO has five settings: OFF, 0.5X, 1X, 2X and 3X. At 0.5X the ship turns as far as the Cardputer
+  does. At 1X it turns twice as far.
+- You can hold the Cardputer at any angle. The game finds the real vertical with the accelerometer.
+  Turn the Cardputer left and the ship yaws left. Tip the top edge toward you and the nose comes up.
+  Turn it like a steering wheel and the ship rolls.
+- A quick turn of the Cardputer takes over from autolock, the same way the pitch and yaw keys do.
+- The original Cardputer has no gyro, so its menu shows `GYRO: N/A`.
+- The SOUND and GYRO settings now stay the same after a reboot.
+
+## 🛰️ Added in v1.3
 
 <table>
 <tr>
@@ -110,24 +125,25 @@ double-buffered now, so the game draws the next frame while the screen shows the
 
 | 👍 Has | 👎 Doesn't have (yet) |
 |---|---|
-| Free 3D flight with pitch, roll and yaw | Music. There are sound effects only. |
+| Free 3D flight with pitch, roll and yaw, on the keys or the ADV's gyro | Music. There are sound effects only. |
 | Trading, bounties, and looting beaten ships | Jobs that span systems. Every job stays in one system. |
 | Lasers, missiles, ECM and autolock | Other ships to buy. You fly one ship and upgrade it. |
 | A reputation with four factions that changes prices and patrols | Saving in flight. You save while landed on a planet. |
 
 ## 🚀 Try it in 3 steps
 
-1. **Get a Cardputer.** Hazke runs on the [M5Stack Cardputer](https://docs.m5stack.com/en/core/Cardputer).
-2. **Flash it.** Pick Hazke in your launcher's app list, or download `hazke-v1.3.0-cardputer.bin` from
+1. **Get a Cardputer.** Hazke runs on the [M5Stack Cardputer](https://docs.m5stack.com/en/core/Cardputer)
+   and the Cardputer ADV. Gyro aiming needs the ADV.
+2. **Flash it.** Pick Hazke in your launcher's app list, or download `hazke-v1.4.0-cardputer.bin` from
    [Releases](https://github.com/therezor/hazke/releases/latest) and write it at address `0x0` with the
    [ESP web flasher](https://espressif.github.io/esptool-js/), M5Burner or
-   `esptool.py --chip esp32s3 write_flash 0x0 hazke-v1.3.0-cardputer.bin`.
+   `esptool.py --chip esp32s3 write_flash 0x0 hazke-v1.4.0-cardputer.bin`.
 3. **Choose NEW GAME and type a name.** You start next to a jump gate with 100 credits. Fly into a
    planet to land and trade, and fly into a jump gate to travel.
 
 > [!NOTE]
 > The full image clears the save slots in internal flash. To upgrade and keep them, write only the
-> game with `esptool.py --chip esp32s3 write_flash 0x10000 hazke-v1.3.0-app.bin`, or copy your slots
+> game with `esptool.py --chip esp32s3 write_flash 0x10000 hazke-v1.4.0-app.bin`, or copy your slots
 > to the SD card first with `COPY` in the save menu.
 
 To build it yourself, install the `M5Cardputer` library in the Arduino IDE, open `hazke.ino`, pick
@@ -154,6 +170,8 @@ The arrow keys are `;` `,` `.` `/`, marked with arrows on the Cardputer.
 | `Tab` | next target, ships and places |
 | `H` | hail or loot a nearby ship |
 | `M` | system map |
+| turn the Cardputer ADV | aim, with GYRO on |
+| `Alt` (hold) | stop gyro aiming |
 | `Enter` | confirm |
 | `` ` `` | back / pause |
 | `Ctrl` + `Space` | screenshot to the SD card |
@@ -194,7 +212,9 @@ internal flash and five on the microSD card, and `COPY` in the save menu copies 
 other. Saves from older versions load in newer ones. A save made by a newer version shows as
 `NEWER VERSION`, and the game leaves it alone.
 
-v1.3 changed the save format. v1.2 saves load fine, but once you save a slot in v1.3, v1.2 can't read it.
+v1.4 uses the same save format as v1.3, so the two read each other's slots. v1.2 saves load in both,
+but once you save a slot in v1.3 or later, v1.2 can't read it. The SOUND and GYRO settings are kept
+apart from the slots and apply to every commander.
 
 ## 🔧 Under the hood
 
@@ -209,7 +229,11 @@ v1.3 changed the save format. v1.2 saves load fine, but once you save a slot in 
 5. **Sound is synthesized at boot.** `Audio.h` builds every effect from oscillators and filtered noise
    into an 8-bit sample bank, and the speaker task mixes them on separate channels.
 6. **Saves carry a version and a checksum.** When the format changes, `SaveFormat.h` upgrades older
-   saves step by step as they load.
+   saves step by step as they load. `Settings.h` keeps SOUND and GYRO in NVS, outside the slots, so
+   menu options never change the save format.
+7. **Gyro turns follow how you hold the Cardputer.** `Gyro.h` tracks the vertical with a complementary
+   filter on the accelerometer, then splits each gyro reading into yaw about that vertical, pitch and
+   roll. While the Cardputer is still, it measures the gyro's drift and subtracts it.
 
 <details>
 <summary><b>🖥️ Serial console and frame capture</b></summary>
@@ -225,6 +249,7 @@ With the Cardputer connected over USB, a serial terminal at 115200 baud accepts 
 | `keys <chars>` | holds those keys down (`T` is Tab, `N` is Enter) |
 | `step <n>` / `rec <n>` | runs `n` frames of 1/25 s each; `rec` also sends each frame |
 | `shot` | sends the current frame |
+| `imu` | prints the IMU reading, the gyro drift and the turn rates it adds |
 
 The firmware sends frames as run-length packed RGB565, and `Capture.h` describes the format.
 `tools/capture.py` sends these commands from a computer and saves the frames as PNGs. Every clip and
@@ -243,6 +268,8 @@ python3 tools/capture.py autolock 'T*1' 'f*1r' '_*80r'   # mark a target, press 
 hazke.ino           state machine, frame loop, serial console
 Config.h            version, screen layout, build switches
 Input.h             keyboard polling and keys held by the console
+Gyro.h              gyro aiming on the Cardputer ADV
+Settings.h          SOUND and GYRO, kept in NVS
 Capture.h           frame capture over serial
 GameState.h         credits, cargo, ship, factions
 Galaxy.h            the 16 systems and their gate links
@@ -277,6 +304,9 @@ Screenshot.h        Ctrl+Space screenshots
 <details>
 <summary><b>📜 Changelog</b></summary>
 
+- **v1.4**, gyro aiming
+  - Gyro aiming on the Cardputer ADV, with five settings and `Alt` to stop it.
+  - SOUND and GYRO stay set after a reboot. Serial console `imu` command.
 - **v1.3**, a new cockpit and open space
   - Autolock module, 3D scanner with hit arcs, segmented gauges and rocket missiles.
   - A bigger system map with zoom, and red or green markers for hostile and friendly ships.
